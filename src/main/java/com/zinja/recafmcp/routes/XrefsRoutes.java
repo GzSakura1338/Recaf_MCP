@@ -12,7 +12,7 @@ import software.coley.recaf.info.ClassInfo;
 import software.coley.recaf.info.member.ClassMember;
 import software.coley.recaf.path.ClassMemberPathNode;
 import software.coley.recaf.path.ClassPathNode;
-import software.coley.recaf.path.InstructionPathNode;
+import software.coley.recaf.path.JvmInstructionPathNode;
 import software.coley.recaf.path.PathNode;
 import software.coley.recaf.services.inheritance.InheritanceGraph;
 import software.coley.recaf.services.inheritance.InheritanceGraphService;
@@ -171,7 +171,7 @@ public class XrefsRoutes {
             out.addProperty("member_kind", memberPath.isMethod() ? "method" : "field");
         }
 
-        InstructionPathNode insnPath = path.getPathOfType(org.objectweb.asm.tree.AbstractInsnNode.class);
+        JvmInstructionPathNode insnPath = path.getPathOfType(org.objectweb.asm.tree.AbstractInsnNode.class);
         if (insnPath != null) out.addProperty("instruction_index", insnPath.getInstructionIndex());
         return out;
     }

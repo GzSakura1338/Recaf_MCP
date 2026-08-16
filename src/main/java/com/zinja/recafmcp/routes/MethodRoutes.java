@@ -71,7 +71,7 @@ public class MethodRoutes {
             StringWriter sw = new StringWriter();
             PrintWriter pw = new PrintWriter(sw);
             Textifier textifier = new Textifier();
-            boolean[] emitted = { false };
+            boolean[] emitted = {false};
 
             new ClassReader(lookup.cls.getBytecode()).accept(new ClassVisitor(Opcodes.ASM9) {
                 @Override
@@ -159,5 +159,6 @@ public class MethodRoutes {
         return new Lookup(cls, candidates.get(0), descriptor != null && !descriptor.isEmpty() ? descriptor : null);
     }
 
-    private record Lookup(JvmClassInfo cls, MethodMember method, String descriptorFilter) {}
+    private record Lookup(JvmClassInfo cls, MethodMember method, String descriptorFilter) {
+    }
 }

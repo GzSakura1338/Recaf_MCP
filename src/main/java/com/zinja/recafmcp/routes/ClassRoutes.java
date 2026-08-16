@@ -6,9 +6,9 @@ import com.zinja.recafmcp.http.JsonResponses;
 import com.zinja.recafmcp.http.McpHttpServer;
 import org.objectweb.asm.util.Textifier;
 import org.objectweb.asm.util.TraceClassVisitor;
-import software.coley.recaf.info.JvmClassInfo;
 import software.coley.recaf.info.ClassInfo;
 import software.coley.recaf.info.InnerClassInfo;
+import software.coley.recaf.info.JvmClassInfo;
 import software.coley.recaf.info.annotation.AnnotationInfo;
 import software.coley.recaf.info.member.FieldMember;
 import software.coley.recaf.info.member.MethodMember;
@@ -32,7 +32,10 @@ public class ClassRoutes {
     public void register(McpHttpServer server) {
         server.get("/all-classes", (req, res) -> {
             Workspace ws = wm.getCurrent();
-            if (ws == null) { res.json(JsonResponses.error("no workspace open")); return; }
+            if (ws == null) {
+                res.json(JsonResponses.error("no workspace open"));
+                return;
+            }
 
             int offset = req.queryInt("offset", 0);
             int limit = req.queryInt("limit", 0);
@@ -45,7 +48,11 @@ public class ClassRoutes {
                     .collect(Collectors.toList());
 
             JsonObject out = JsonResponses.paginated(names, "classes", offset, limit,
-                    n -> { JsonObject o = new JsonObject(); o.addProperty("name", (String) n); return o; });
+                    n -> {
+                        JsonObject o = new JsonObject();
+                        o.addProperty("name", (String) n);
+                        return o;
+                    });
             res.json(out);
         });
 
@@ -152,7 +159,10 @@ public class ClassRoutes {
 
     private JvmClassInfo requireClass(String nameParam, com.zinja.recafmcp.http.Response res) throws Exception {
         Workspace ws = wm.getCurrent();
-        if (ws == null) { res.status(409).json(JsonResponses.error("no workspace open")); return null; }
+        if (ws == null) {
+            res.status(409).json(JsonResponses.error("no workspace open"));
+            return null;
+        }
         if (nameParam == null || nameParam.isEmpty()) {
             res.status(400).json(JsonResponses.error("missing 'class_name'"));
             return null;

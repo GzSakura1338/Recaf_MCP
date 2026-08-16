@@ -8,7 +8,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
-/** Mutable response wrapper — status + body helpers. */
+/**
+ * Mutable response wrapper — status + body helpers.
+ */
 public class Response {
     private static final Gson GSON = new Gson();
 

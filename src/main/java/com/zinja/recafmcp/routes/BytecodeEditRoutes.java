@@ -5,7 +5,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.zinja.recafmcp.http.JsonResponses;
 import com.zinja.recafmcp.http.McpHttpServer;
-import org.objectweb.asm.tree.*;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.MethodNode;
 import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.services.workspace.io.PathWorkspaceExportConsumer;
 import software.coley.recaf.services.workspace.io.WorkspaceCompressType;
@@ -16,9 +18,12 @@ import software.coley.recaf.workspace.model.Workspace;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
-import java.util.logging.Logger;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
+import java.util.Locale;
 import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class BytecodeEditRoutes {
     private static final Logger LOG = Logger.getLogger(BytecodeEditRoutes.class.getName());
@@ -67,7 +72,10 @@ public class BytecodeEditRoutes {
             }
             try {
                 int ok = BytecodeEditSupport.replaceMethodBody(wm.getCurrent(), target, insns);
-                if (ok == 0) { res.status(500).json(JsonResponses.error("failed to update method body")); return; }
+                if (ok == 0) {
+                    res.status(500).json(JsonResponses.error("failed to update method body"));
+                    return;
+                }
                 JsonObject out = JsonResponses.ok("method body replaced");
                 out.addProperty("affected_classes", 1);
                 out.addProperty("instruction_count", insns.size());
@@ -90,7 +98,10 @@ public class BytecodeEditRoutes {
             }
             try {
                 int ok = BytecodeEditSupport.assembleMethodBody(wm.getCurrent(), target, text);
-                if (ok == 0) { res.status(500).json(JsonResponses.error("failed to assemble method")); return; }
+                if (ok == 0) {
+                    res.status(500).json(JsonResponses.error("failed to assemble method"));
+                    return;
+                }
                 res.json(JsonResponses.ok("method assembled"));
             } catch (IllegalArgumentException e) {
                 res.status(400).json(JsonResponses.error(e.getMessage()));
@@ -107,13 +118,20 @@ public class BytecodeEditRoutes {
 
         // ── edit access flags ──────────────────────────────────────
         server.post("/class/edit-access", (req, res) -> {
-            Workspace ws = requireWorkspace(res); if (ws == null) return;
+            Workspace ws = requireWorkspace(res);
+            if (ws == null) return;
             String name = req.bodyString("class_name", "");
-            if (name.isBlank()) { res.status(400).json(JsonResponses.error("missing 'class_name'")); return; }
+            if (name.isBlank()) {
+                res.status(400).json(JsonResponses.error("missing 'class_name'"));
+                return;
+            }
             List<String> setF = toList(req.body().getAsJsonArray("set_flags"));
             List<String> clearF = toList(req.body().getAsJsonArray("clear_flags"));
             int ok = BytecodeEditSupport.editClassAccess(ws, name, setF, clearF);
-            if (ok == 0) { res.status(404).json(JsonResponses.error("class not found")); return; }
+            if (ok == 0) {
+                res.status(404).json(JsonResponses.error("class not found"));
+                return;
+            }
             res.json(JsonResponses.ok("class access flags updated"));
         });
 
@@ -125,15 +143,19 @@ public class BytecodeEditRoutes {
             List<String> setF = toList(req.body().getAsJsonArray("set_flags"));
             List<String> clearF = toList(req.body().getAsJsonArray("clear_flags"));
             int ok = BytecodeEditSupport.editMethodAccess(wm.getCurrent(), target, setF, clearF);
-            if (ok == 0) { res.status(500).json(JsonResponses.error("failed to update method access")); return; }
+            if (ok == 0) {
+                res.status(500).json(JsonResponses.error("failed to update method access"));
+                return;
+            }
             res.json(JsonResponses.ok("method access flags updated"));
         });
 
         server.post("/field/edit-access", (req, res) -> {
-            Workspace ws = requireWorkspace(res); if (ws == null) return;
+            Workspace ws = requireWorkspace(res);
+            if (ws == null) return;
             String cls = req.bodyString("class_name", "");
-            String fn  = req.bodyString("field_name", "");
-            String fd  = req.bodyString("descriptor", "");
+            String fn = req.bodyString("field_name", "");
+            String fd = req.bodyString("descriptor", "");
             if (cls.isBlank() || fn.isBlank()) {
                 res.status(400).json(JsonResponses.error("missing 'class_name' or 'field_name'"));
                 return;
@@ -141,13 +163,17 @@ public class BytecodeEditRoutes {
             List<String> setF = toList(req.body().getAsJsonArray("set_flags"));
             List<String> clearF = toList(req.body().getAsJsonArray("clear_flags"));
             int ok = BytecodeEditSupport.editFieldAccess(ws, cls, fn, fd, setF, clearF);
-            if (ok == 0) { res.status(404).json(JsonResponses.error("field not found")); return; }
+            if (ok == 0) {
+                res.status(404).json(JsonResponses.error("field not found"));
+                return;
+            }
             res.json(JsonResponses.ok("field access flags updated"));
         });
 
         // ── replace class bytes ────────────────────────────────────
         server.post("/class/replace-bytes", (req, res) -> {
-            Workspace ws = requireWorkspace(res); if (ws == null) return;
+            Workspace ws = requireWorkspace(res);
+            if (ws == null) return;
             String name = req.bodyString("class_name", "");
             String b64 = req.bodyString("bytes_base64", "");
             if (name.isBlank() || b64.isBlank()) {
@@ -156,16 +182,20 @@ public class BytecodeEditRoutes {
             }
             byte[] bytes = Base64.getDecoder().decode(b64);
             int ok = BytecodeEditSupport.replaceClassBytes(ws, name, bytes);
-            if (ok == 0) { res.status(404).json(JsonResponses.error("class not found in workspace")); return; }
+            if (ok == 0) {
+                res.status(404).json(JsonResponses.error("class not found in workspace"));
+                return;
+            }
             res.json(JsonResponses.ok("class bytes replaced"));
         });
 
         // ── add / remove methods ───────────────────────────────────
         server.post("/method/add", (req, res) -> {
-            Workspace ws = requireWorkspace(res); if (ws == null) return;
+            Workspace ws = requireWorkspace(res);
+            if (ws == null) return;
             String cls = req.bodyString("class_name", "");
-            String mn  = req.bodyString("method_name", "");
-            String md  = req.bodyString("descriptor", "");
+            String mn = req.bodyString("method_name", "");
+            String md = req.bodyString("descriptor", "");
             if (cls.isBlank() || mn.isBlank() || md.isBlank()) {
                 res.status(400).json(JsonResponses.error("missing 'class_name', 'method_name', or 'descriptor'"));
                 return;
@@ -173,8 +203,14 @@ public class BytecodeEditRoutes {
             int acc = flagsFromJson(req.body().getAsJsonArray("access"));
             JsonArray insns = req.body().getAsJsonArray("instructions");
             int ok = BytecodeEditSupport.addMethod(ws, cls, mn, md, acc, insns);
-            if (ok < 0) { res.status(409).json(JsonResponses.error("method already exists")); return; }
-            if (ok == 0) { res.status(404).json(JsonResponses.error("class not found")); return; }
+            if (ok < 0) {
+                res.status(409).json(JsonResponses.error("method already exists"));
+                return;
+            }
+            if (ok == 0) {
+                res.status(404).json(JsonResponses.error("class not found"));
+                return;
+            }
             res.json(JsonResponses.ok("method added"));
         });
 
@@ -184,16 +220,20 @@ public class BytecodeEditRoutes {
                     req.bodyString("descriptor", ""), res);
             if (target == null) return;
             int ok = BytecodeEditSupport.removeMethod(wm.getCurrent(), target);
-            if (ok == 0) { res.status(500).json(JsonResponses.error("failed to remove method")); return; }
+            if (ok == 0) {
+                res.status(500).json(JsonResponses.error("failed to remove method"));
+                return;
+            }
             res.json(JsonResponses.ok("method removed"));
         });
 
         // ── add / remove fields ────────────────────────────────────
         server.post("/field/add", (req, res) -> {
-            Workspace ws = requireWorkspace(res); if (ws == null) return;
+            Workspace ws = requireWorkspace(res);
+            if (ws == null) return;
             String cls = req.bodyString("class_name", "");
-            String fn  = req.bodyString("field_name", "");
-            String fd  = req.bodyString("descriptor", "");
+            String fn = req.bodyString("field_name", "");
+            String fd = req.bodyString("descriptor", "");
             if (cls.isBlank() || fn.isBlank() || fd.isBlank()) {
                 res.status(400).json(JsonResponses.error("missing 'class_name', 'field_name', or 'descriptor'"));
                 return;
@@ -202,22 +242,32 @@ public class BytecodeEditRoutes {
             String sig = req.bodyString("signature", null);
             Object val = fieldValue(req.body().get("value"));
             int ok = BytecodeEditSupport.addField(ws, cls, fn, fd, acc, sig, val);
-            if (ok < 0) { res.status(409).json(JsonResponses.error("field already exists")); return; }
-            if (ok == 0) { res.status(404).json(JsonResponses.error("class not found")); return; }
+            if (ok < 0) {
+                res.status(409).json(JsonResponses.error("field already exists"));
+                return;
+            }
+            if (ok == 0) {
+                res.status(404).json(JsonResponses.error("class not found"));
+                return;
+            }
             res.json(JsonResponses.ok("field added"));
         });
 
         server.post("/field/remove", (req, res) -> {
-            Workspace ws = requireWorkspace(res); if (ws == null) return;
+            Workspace ws = requireWorkspace(res);
+            if (ws == null) return;
             String cls = req.bodyString("class_name", "");
-            String fn  = req.bodyString("field_name", "");
-            String fd  = req.bodyString("descriptor", "");
+            String fn = req.bodyString("field_name", "");
+            String fd = req.bodyString("descriptor", "");
             if (cls.isBlank() || fn.isBlank()) {
                 res.status(400).json(JsonResponses.error("missing 'class_name' or 'field_name'"));
                 return;
             }
             int ok = BytecodeEditSupport.removeField(ws, cls, fn, fd);
-            if (ok == 0) { res.status(404).json(JsonResponses.error("field not found")); return; }
+            if (ok == 0) {
+                res.status(404).json(JsonResponses.error("field not found"));
+                return;
+            }
             res.json(JsonResponses.ok("field removed"));
         });
 
@@ -233,13 +283,17 @@ public class BytecodeEditRoutes {
                 return;
             }
             int ok = BytecodeEditSupport.setTryCatchBlocks(wm.getCurrent(), target, tc);
-            if (ok == 0) { res.status(500).json(JsonResponses.error("failed to set try-catch blocks")); return; }
+            if (ok == 0) {
+                res.status(500).json(JsonResponses.error("failed to set try-catch blocks"));
+                return;
+            }
             res.json(JsonResponses.ok("try-catch blocks updated"));
         });
 
         // ── save workspace ─────────────────────────────────────────
         server.post("/workspace/save", (req, res) -> {
-            Workspace ws = requireWorkspace(res); if (ws == null) return;
+            Workspace ws = requireWorkspace(res);
+            if (ws == null) return;
             String outputPath = req.bodyString("output_path", "");
             if (outputPath.isBlank()) {
                 res.status(400).json(JsonResponses.error("missing 'output_path'"));
@@ -253,7 +307,10 @@ public class BytecodeEditRoutes {
                 outType = fname.contains(".") ? WorkspaceOutputType.FILE : WorkspaceOutputType.DIRECTORY;
             }
             if (outType == WorkspaceOutputType.DIRECTORY) Files.createDirectories(path);
-            else { Path parent = path.getParent(); if (parent != null) Files.createDirectories(parent); }
+            else {
+                Path parent = path.getParent();
+                if (parent != null) Files.createDirectories(parent);
+            }
 
             WorkspaceExportOptions opts = new WorkspaceExportOptions(
                     WorkspaceCompressType.MATCH_ORIGINAL, outType,
@@ -272,7 +329,7 @@ public class BytecodeEditRoutes {
     // ── helpers ──────────────────────────────────────────────────────────
 
     private RouteSupport.MethodTarget resolveMethod(String className, String methodName,
-                                                     String descriptor, com.zinja.recafmcp.http.Response res) throws Exception {
+                                                    String descriptor, com.zinja.recafmcp.http.Response res) throws Exception {
         Workspace ws = requireWorkspace(res);
         if (ws == null) return null;
         return RouteSupport.requireMethod(ws, className, methodName, descriptor, res);
@@ -285,48 +342,66 @@ public class BytecodeEditRoutes {
     }
 
     private void singleInsnOp(com.zinja.recafmcp.http.Request req,
-                               com.zinja.recafmcp.http.Response res, String op) throws Exception {
+                              com.zinja.recafmcp.http.Response res, String op) throws Exception {
         RouteSupport.MethodTarget target = resolveMethod(
                 req.bodyString("class_name", ""), req.bodyString("method_name", ""),
                 req.bodyString("descriptor", ""), res);
         if (target == null) return;
 
         int index = req.bodyInt("index", -1);
-        if (index < 0) { res.status(400).json(JsonResponses.error("missing 'index'")); return; }
+        if (index < 0) {
+            res.status(400).json(JsonResponses.error("missing 'index'"));
+            return;
+        }
 
         ClassNode cn = BytecodeEditSupport.readClassNode(target.classInfo());
         MethodNode method = null;
         for (MethodNode m : cn.methods) {
-            if (m.name.equals(target.name()) && m.desc.equals(target.descriptor())) { method = m; break; }
+            if (m.name.equals(target.name()) && m.desc.equals(target.descriptor())) {
+                method = m;
+                break;
+            }
         }
-        if (method == null) { res.status(404).json(JsonResponses.error("method not found in bytecode")); return; }
+        if (method == null) {
+            res.status(404).json(JsonResponses.error("method not found in bytecode"));
+            return;
+        }
 
         InsnList insns = method.instructions;
 
         if ("remove".equals(op)) {
             if (index >= insns.size()) {
-                res.status(400).json(JsonResponses.error("index out of range")); return;
+                res.status(400).json(JsonResponses.error("index out of range"));
+                return;
             }
             insns.remove(insns.get(index));
         } else {
             JsonObject newInsn = req.body().getAsJsonObject("instruction");
             if (newInsn == null) {
-                res.status(400).json(JsonResponses.error("missing 'instruction'")); return;
+                res.status(400).json(JsonResponses.error("missing 'instruction'"));
+                return;
             }
             String opName = newInsn.get("opcode").getAsString().toUpperCase(Locale.ROOT);
             JsonArray args = newInsn.has("args") ? newInsn.getAsJsonArray("args") : new JsonArray();
             try {
                 var insn = BytecodeEditSupport.buildSingleInstruction(opName, args);
                 if ("replace".equals(op)) {
-                    if (index >= insns.size()) { res.status(400).json(JsonResponses.error("index out of range")); return; }
+                    if (index >= insns.size()) {
+                        res.status(400).json(JsonResponses.error("index out of range"));
+                        return;
+                    }
                     insns.set(insns.get(index), insn);
                 } else { // insert
-                    if (index > insns.size()) { res.status(400).json(JsonResponses.error("index out of range")); return; }
+                    if (index > insns.size()) {
+                        res.status(400).json(JsonResponses.error("index out of range"));
+                        return;
+                    }
                     if (index < insns.size()) insns.insertBefore(insns.get(index), insn);
                     else insns.add(insn);
                 }
             } catch (IllegalArgumentException e) {
-                res.status(400).json(JsonResponses.error(e.getMessage())); return;
+                res.status(400).json(JsonResponses.error(e.getMessage()));
+                return;
             }
         }
 

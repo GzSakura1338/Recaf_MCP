@@ -79,22 +79,35 @@ public class InheritanceRoutes {
 
     private InheritanceVertex vertex(String param, com.zinja.recafmcp.http.Response res) throws Exception {
         Workspace ws = wm.getCurrent();
-        if (ws == null) { res.status(409).json(JsonResponses.error("no workspace open")); return null; }
+        if (ws == null) {
+            res.status(409).json(JsonResponses.error("no workspace open"));
+            return null;
+        }
         if (param == null || param.isEmpty()) {
             res.status(400).json(JsonResponses.error("missing class/interface name"));
             return null;
         }
         InheritanceGraph graph = graphService.getCurrentWorkspaceInheritanceGraph();
-        if (graph == null) { res.status(409).json(JsonResponses.error("inheritance graph unavailable")); return null; }
+        if (graph == null) {
+            res.status(409).json(JsonResponses.error("inheritance graph unavailable"));
+            return null;
+        }
         InheritanceVertex v = graph.getVertex(param.replace('.', '/'));
-        if (v == null) { res.status(404).json(JsonResponses.error("class not found in graph: " + param)); return null; }
+        if (v == null) {
+            res.status(404).json(JsonResponses.error("class not found in graph: " + param));
+            return null;
+        }
         return v;
     }
 
     private static void respondNames(com.zinja.recafmcp.http.Response res, Set<String> names, int offset, int limit) throws Exception {
         JsonObject out = JsonResponses.paginated(
                 new java.util.ArrayList<>(names), "classes", offset, limit,
-                n -> { JsonObject o = new JsonObject(); o.addProperty("name", (String) n); return o; });
+                n -> {
+                    JsonObject o = new JsonObject();
+                    o.addProperty("name", (String) n);
+                    return o;
+                });
         res.json(out);
     }
 }

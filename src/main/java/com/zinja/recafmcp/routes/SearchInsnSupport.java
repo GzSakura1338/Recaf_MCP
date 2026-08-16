@@ -2,24 +2,15 @@ package com.zinja.recafmcp.routes;
 
 import com.google.gson.JsonObject;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.FieldInsnNode;
-import org.objectweb.asm.tree.IincInsnNode;
-import org.objectweb.asm.tree.IntInsnNode;
-import org.objectweb.asm.tree.InvokeDynamicInsnNode;
-import org.objectweb.asm.tree.LdcInsnNode;
-import org.objectweb.asm.tree.MethodInsnNode;
-import org.objectweb.asm.tree.MethodNode;
-import org.objectweb.asm.tree.MultiANewArrayInsnNode;
-import org.objectweb.asm.tree.TypeInsnNode;
-import org.objectweb.asm.tree.VarInsnNode;
+import org.objectweb.asm.tree.*;
 import org.objectweb.asm.util.Printer;
 import software.coley.recaf.info.JvmClassInfo;
 
 import java.math.BigDecimal;
 
 final class SearchInsnSupport {
-    private SearchInsnSupport() {}
+    private SearchInsnSupport() {
+    }
 
     static Number constantValue(AbstractInsnNode insn) {
         return switch (insn.getOpcode()) {
@@ -44,8 +35,10 @@ final class SearchInsnSupport {
     static boolean numberMatches(String queryValue, Number value) {
         String trimmed = queryValue == null ? "" : queryValue.trim();
         if (trimmed.isEmpty()) return false;
-        if (value instanceof Double d && (Double.isNaN(d) || Double.isInfinite(d))) return trimmed.equalsIgnoreCase(value.toString());
-        if (value instanceof Float f && (Float.isNaN(f) || Float.isInfinite(f))) return trimmed.equalsIgnoreCase(value.toString());
+        if (value instanceof Double d && (Double.isNaN(d) || Double.isInfinite(d)))
+            return trimmed.equalsIgnoreCase(value.toString());
+        if (value instanceof Float f && (Float.isNaN(f) || Float.isInfinite(f)))
+            return trimmed.equalsIgnoreCase(value.toString());
 
         try {
             BigDecimal query = new BigDecimal(trimmed.replaceAll("[dDfFlL]$", ""));

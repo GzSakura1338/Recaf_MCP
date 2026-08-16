@@ -4,7 +4,8 @@ import java.util.Arrays;
 import java.util.List;
 
 final class MethodSourceSupport {
-    private MethodSourceSupport() {}
+    private MethodSourceSupport() {
+    }
 
     static ExtractedMethod extract(String text, String internalClassName, String methodName) {
         List<String> lines = Arrays.asList(text.split("\\R", -1));
@@ -100,5 +101,6 @@ final class MethodSourceSupport {
         return inner >= 0 ? name.substring(inner + 1) : name;
     }
 
-    record ExtractedMethod(String source, int lineStart, int lineEnd) {}
+    record ExtractedMethod(String source, int lineStart, int lineEnd) {
+    }
 }

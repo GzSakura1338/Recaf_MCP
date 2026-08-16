@@ -13,7 +13,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Query-string and JSON-body accessors for an incoming request. */
+/**
+ * Query-string and JSON-body accessors for an incoming request.
+ */
 public class Request {
     private final HttpExchange exchange;
     private Map<String, String> query;
@@ -35,7 +37,11 @@ public class Request {
     public int queryInt(String key, int defaultValue) {
         String v = query(key);
         if (v == null || v.isEmpty()) return defaultValue;
-        try { return Integer.parseInt(v); } catch (NumberFormatException e) { return defaultValue; }
+        try {
+            return Integer.parseInt(v);
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 
     public boolean queryBool(String key, boolean defaultValue) {
