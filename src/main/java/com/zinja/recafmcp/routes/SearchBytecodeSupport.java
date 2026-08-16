@@ -2,11 +2,7 @@ package com.zinja.recafmcp.routes;
 
 import com.google.gson.JsonObject;
 import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.LdcInsnNode;
-import org.objectweb.asm.tree.LineNumberNode;
-import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.*;
 import software.coley.recaf.info.JvmClassInfo;
 import software.coley.recaf.path.ClassPathNode;
 import software.coley.recaf.workspace.model.Workspace;
@@ -16,7 +12,8 @@ import java.util.List;
 import java.util.function.Predicate;
 
 final class SearchBytecodeSupport {
-    private SearchBytecodeSupport() {}
+    private SearchBytecodeSupport() {
+    }
 
     static List<JsonObject> searchStrings(Workspace ws, Predicate<String> matcher) {
         List<JsonObject> hits = new ArrayList<>();
@@ -64,7 +61,8 @@ final class SearchBytecodeSupport {
                 if (!opcodeNeedle.isEmpty() && !opcodeName.equals(opcodeNeedle)) return;
 
                 String operandText = SearchInsnSupport.operandText(insn);
-                if (!operandNeedle.isEmpty() && !SearchInsnSupport.normalize(operandText).contains(operandNeedle)) return;
+                if (!operandNeedle.isEmpty() && !SearchInsnSupport.normalize(operandText).contains(operandNeedle))
+                    return;
 
                 hits.add(SearchInsnSupport.hit(cls, method, index, line)
                         .with("opcode", opcodeName)

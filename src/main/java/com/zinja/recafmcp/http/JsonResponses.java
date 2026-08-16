@@ -6,9 +6,12 @@ import com.google.gson.JsonObject;
 import java.util.List;
 import java.util.function.Function;
 
-/** Shared JSON response builders. */
+/**
+ * Shared JSON response builders.
+ */
 public final class JsonResponses {
-    private JsonResponses() {}
+    private JsonResponses() {
+    }
 
     public static JsonObject error(String message) {
         JsonObject obj = new JsonObject();

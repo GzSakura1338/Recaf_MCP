@@ -29,7 +29,10 @@ public class SearchRoutes {
     public void register(McpHttpServer server) {
         server.get("/search/classes", (req, res) -> {
             Workspace ws = wm.getCurrent();
-            if (ws == null) { res.json(JsonResponses.error("no workspace open")); return; }
+            if (ws == null) {
+                res.json(JsonResponses.error("no workspace open"));
+                return;
+            }
 
             Matcher matcher = Matcher.of(req.query("pattern", ""), req.queryBool("regex", false), req.queryBool("case_sensitive", true));
             List<String> names = ws.jvmClassesStream()
@@ -41,13 +44,20 @@ public class SearchRoutes {
                     .toList();
 
             JsonObject out = JsonResponses.paginated(names, "classes", req.queryInt("offset", 0), req.queryInt("limit", 0),
-                    name -> { JsonObject item = new JsonObject(); item.addProperty("name", name); return item; });
+                    name -> {
+                        JsonObject item = new JsonObject();
+                        item.addProperty("name", name);
+                        return item;
+                    });
             res.json(out);
         });
 
         server.get("/search/members", (req, res) -> {
             Workspace ws = wm.getCurrent();
-            if (ws == null) { res.json(JsonResponses.error("no workspace open")); return; }
+            if (ws == null) {
+                res.json(JsonResponses.error("no workspace open"));
+                return;
+            }
 
             Matcher matcher = Matcher.of(req.query("pattern", ""), req.queryBool("regex", false), req.queryBool("case_sensitive", true));
             String kind = req.query("kind", "any");
@@ -57,12 +67,14 @@ public class SearchRoutes {
                 JvmClassInfo cls = (JvmClassInfo) node.getValue();
                 if (kind.equals("any") || kind.equals("method")) {
                     for (MethodMember method : cls.getMethods()) {
-                        if (matcher.matches(method.getName())) hits.add(memberHit("method", cls, method.getName(), method.getDescriptor()));
+                        if (matcher.matches(method.getName()))
+                            hits.add(memberHit("method", cls, method.getName(), method.getDescriptor()));
                     }
                 }
                 if (kind.equals("any") || kind.equals("field")) {
                     for (FieldMember field : cls.getFields()) {
-                        if (matcher.matches(field.getName())) hits.add(memberHit("field", cls, field.getName(), field.getDescriptor()));
+                        if (matcher.matches(field.getName()))
+                            hits.add(memberHit("field", cls, field.getName(), field.getDescriptor()));
                     }
                 }
             });
@@ -73,7 +85,10 @@ public class SearchRoutes {
 
         server.get("/search/strings", (req, res) -> {
             Workspace ws = wm.getCurrent();
-            if (ws == null) { res.json(JsonResponses.error("no workspace open")); return; }
+            if (ws == null) {
+                res.json(JsonResponses.error("no workspace open"));
+                return;
+            }
 
             Matcher matcher = Matcher.of(req.query("pattern", ""), req.queryBool("regex", false), req.queryBool("case_sensitive", true));
             List<JsonObject> hits = SearchBytecodeSupport.searchStrings(ws, matcher::matches);
@@ -83,7 +98,10 @@ public class SearchRoutes {
 
         server.get("/search/numbers", (req, res) -> {
             Workspace ws = wm.getCurrent();
-            if (ws == null) { res.json(JsonResponses.error("no workspace open")); return; }
+            if (ws == null) {
+                res.json(JsonResponses.error("no workspace open"));
+                return;
+            }
 
             String value = req.query("value", "").trim();
             if (value.isEmpty()) {
@@ -98,7 +116,10 @@ public class SearchRoutes {
 
         server.get("/search/instructions", (req, res) -> {
             Workspace ws = wm.getCurrent();
-            if (ws == null) { res.json(JsonResponses.error("no workspace open")); return; }
+            if (ws == null) {
+                res.json(JsonResponses.error("no workspace open"));
+                return;
+            }
 
             List<JsonObject> hits = SearchBytecodeSupport.searchInstructions(
                     ws,

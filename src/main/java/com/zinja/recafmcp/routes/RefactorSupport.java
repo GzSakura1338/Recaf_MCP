@@ -12,7 +12,8 @@ import software.coley.recaf.workspace.model.Workspace;
 import software.coley.recaf.workspace.model.bundle.JvmClassBundle;
 
 final class RefactorSupport {
-    private RefactorSupport() {}
+    private RefactorSupport() {
+    }
 
     static int renameLocalVariables(Workspace ws, RouteSupport.MethodTarget target, String variableName, String newName, int index) {
         ClassNode classNode = new ClassNode();
@@ -20,7 +21,8 @@ final class RefactorSupport {
 
         int renamed = 0;
         for (MethodNode method : classNode.methods) {
-            if (!method.name.equals(target.name()) || !method.desc.equals(target.descriptor()) || method.localVariables == null) continue;
+            if (!method.name.equals(target.name()) || !method.desc.equals(target.descriptor()) || method.localVariables == null)
+                continue;
             for (LocalVariableNode local : method.localVariables) {
                 if (!local.name.equals(variableName)) continue;
                 if (index >= 0 && local.index != index) continue;

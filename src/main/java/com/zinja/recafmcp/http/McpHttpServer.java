@@ -13,7 +13,7 @@ import java.util.logging.Logger;
 
 /**
  * Minimal JDK-only HTTP server + path router.
- *
+ * <p>
  * Kept intentionally small so the plugin has no external HTTP dependency — the
  * only third-party dep the plugin relies on is Gson, which Recaf already
  * bundles. Each route is a {@link Handler} that takes a {@link Request} /

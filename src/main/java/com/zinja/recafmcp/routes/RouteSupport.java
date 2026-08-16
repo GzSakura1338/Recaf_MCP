@@ -16,7 +16,8 @@ import java.util.List;
 import java.util.stream.Stream;
 
 final class RouteSupport {
-    private RouteSupport() {}
+    private RouteSupport() {
+    }
 
     static Workspace requireWorkspace(WorkspaceManager wm, com.zinja.recafmcp.http.Response res) throws Exception {
         Workspace ws = wm.getCurrent();
@@ -34,7 +35,8 @@ final class RouteSupport {
 
     static MethodTarget requireMethod(Workspace ws, String className, String methodName, String descriptor,
                                       com.zinja.recafmcp.http.Response res) throws Exception {
-        if (required(className, "class_name", res) == null || required(methodName, "method_name", res) == null) return null;
+        if (required(className, "class_name", res) == null || required(methodName, "method_name", res) == null)
+            return null;
         JvmClassInfo cls = requireClass(ws, className, res);
         if (cls == null) return null;
 
@@ -57,7 +59,8 @@ final class RouteSupport {
 
     static FieldTarget requireField(Workspace ws, String className, String fieldName, String descriptor,
                                     com.zinja.recafmcp.http.Response res) throws Exception {
-        if (required(className, "class_name", res) == null || required(fieldName, "field_name", res) == null) return null;
+        if (required(className, "class_name", res) == null || required(fieldName, "field_name", res) == null)
+            return null;
         JvmClassInfo cls = requireClass(ws, className, res);
         if (cls == null) return null;
 
@@ -100,6 +103,10 @@ final class RouteSupport {
         return name == null ? null : name.replace('/', '.');
     }
 
-    record MethodTarget(JvmClassInfo classInfo, String owner, String name, String descriptor, List<LocalVariable> locals) {}
-    record FieldTarget(String owner, String name, String descriptor) {}
+    record MethodTarget(JvmClassInfo classInfo, String owner, String name, String descriptor,
+                        List<LocalVariable> locals) {
+    }
+
+    record FieldTarget(String owner, String name, String descriptor) {
+    }
 }

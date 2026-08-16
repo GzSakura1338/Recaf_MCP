@@ -22,7 +22,10 @@ public class FilesRoutes {
     public void register(McpHttpServer server) {
         server.get("/files/list", (req, res) -> {
             Workspace ws = wm.getCurrent();
-            if (ws == null) { res.json(JsonResponses.error("no workspace open")); return; }
+            if (ws == null) {
+                res.json(JsonResponses.error("no workspace open"));
+                return;
+            }
 
             List<String> names = ws.filesStream()
                     .map(FilePathNode::getValue)
@@ -31,13 +34,20 @@ public class FilesRoutes {
                     .toList();
 
             JsonObject out = JsonResponses.paginated(names, "files", req.queryInt("offset", 0), req.queryInt("limit", 0),
-                    name -> { JsonObject item = new JsonObject(); item.addProperty("path", name); return item; });
+                    name -> {
+                        JsonObject item = new JsonObject();
+                        item.addProperty("path", name);
+                        return item;
+                    });
             res.json(out);
         });
 
         server.get("/files/content", (req, res) -> {
             Workspace ws = wm.getCurrent();
-            if (ws == null) { res.json(JsonResponses.error("no workspace open")); return; }
+            if (ws == null) {
+                res.json(JsonResponses.error("no workspace open"));
+                return;
+            }
 
             String path = req.query("path");
             if (path == null || path.isEmpty()) {
@@ -70,7 +80,10 @@ public class FilesRoutes {
 
         server.get("/files/manifest", (req, res) -> {
             Workspace ws = wm.getCurrent();
-            if (ws == null) { res.json(JsonResponses.error("no workspace open")); return; }
+            if (ws == null) {
+                res.json(JsonResponses.error("no workspace open"));
+                return;
+            }
 
             FilePathNode node = ws.findFile("META-INF/MANIFEST.MF");
             if (node == null) {
@@ -86,7 +99,10 @@ public class FilesRoutes {
 
         server.get("/files/strings", (req, res) -> {
             Workspace ws = wm.getCurrent();
-            if (ws == null) { res.json(JsonResponses.error("no workspace open")); return; }
+            if (ws == null) {
+                res.json(JsonResponses.error("no workspace open"));
+                return;
+            }
 
             List<JsonObject> strings = new ArrayList<>();
             ws.filesStream().forEach(node -> {
@@ -143,5 +159,6 @@ public class FilesRoutes {
         current.setLength(0);
     }
 
-    private record PrintableString(String value, int offset) {}
+    private record PrintableString(String value, int offset) {
+    }
 }

@@ -1,17 +1,7 @@
 package com.zinja.recafmcp;
 
 import com.zinja.recafmcp.http.McpHttpServer;
-import com.zinja.recafmcp.routes.BytecodeEditRoutes;
-import com.zinja.recafmcp.routes.ClassRoutes;
-import com.zinja.recafmcp.routes.DecompileRoutes;
-import com.zinja.recafmcp.routes.ExportRoutes;
-import com.zinja.recafmcp.routes.FilesRoutes;
-import com.zinja.recafmcp.routes.InheritanceRoutes;
-import com.zinja.recafmcp.routes.MethodRoutes;
-import com.zinja.recafmcp.routes.RefactorRoutes;
-import com.zinja.recafmcp.routes.SearchRoutes;
-import com.zinja.recafmcp.routes.WorkspaceRoutes;
-import com.zinja.recafmcp.routes.XrefsRoutes;
+import com.zinja.recafmcp.routes.*;
 import com.zinja.recafmcp.state.UiState;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

@@ -16,7 +16,8 @@ import java.util.*;
 
 final class BytecodeEditSupport {
 
-    private BytecodeEditSupport() {}
+    private BytecodeEditSupport() {
+    }
 
     // ── public helpers used by BytecodeEditRoutes ──────────────────────
 
@@ -41,65 +42,121 @@ final class BytecodeEditSupport {
         reg("NOP", Opcodes.NOP);
         reg("ACONST_NULL", Opcodes.ACONST_NULL);
         reg("ICONST_M1", Opcodes.ICONST_M1);
-        reg("ICONST_0", Opcodes.ICONST_0); reg("ICONST_1", Opcodes.ICONST_1);
-        reg("ICONST_2", Opcodes.ICONST_2); reg("ICONST_3", Opcodes.ICONST_3);
-        reg("ICONST_4", Opcodes.ICONST_4); reg("ICONST_5", Opcodes.ICONST_5);
-        reg("LCONST_0", Opcodes.LCONST_0); reg("LCONST_1", Opcodes.LCONST_1);
-        reg("FCONST_0", Opcodes.FCONST_0); reg("FCONST_1", Opcodes.FCONST_1);
+        reg("ICONST_0", Opcodes.ICONST_0);
+        reg("ICONST_1", Opcodes.ICONST_1);
+        reg("ICONST_2", Opcodes.ICONST_2);
+        reg("ICONST_3", Opcodes.ICONST_3);
+        reg("ICONST_4", Opcodes.ICONST_4);
+        reg("ICONST_5", Opcodes.ICONST_5);
+        reg("LCONST_0", Opcodes.LCONST_0);
+        reg("LCONST_1", Opcodes.LCONST_1);
+        reg("FCONST_0", Opcodes.FCONST_0);
+        reg("FCONST_1", Opcodes.FCONST_1);
         reg("FCONST_2", Opcodes.FCONST_2);
-        reg("DCONST_0", Opcodes.DCONST_0); reg("DCONST_1", Opcodes.DCONST_1);
-        reg("IALOAD", Opcodes.IALOAD); reg("LALOAD", Opcodes.LALOAD);
-        reg("FALOAD", Opcodes.FALOAD); reg("DALOAD", Opcodes.DALOAD);
-        reg("AALOAD", Opcodes.AALOAD); reg("BALOAD", Opcodes.BALOAD);
-        reg("CALOAD", Opcodes.CALOAD); reg("SALOAD", Opcodes.SALOAD);
-        reg("IASTORE", Opcodes.IASTORE); reg("LASTORE", Opcodes.LASTORE);
-        reg("FASTORE", Opcodes.FASTORE); reg("DASTORE", Opcodes.DASTORE);
-        reg("AASTORE", Opcodes.AASTORE); reg("BASTORE", Opcodes.BASTORE);
-        reg("CASTORE", Opcodes.CASTORE); reg("SASTORE", Opcodes.SASTORE);
-        reg("POP", Opcodes.POP); reg("POP2", Opcodes.POP2);
-        reg("DUP", Opcodes.DUP); reg("DUP_X1", Opcodes.DUP_X1);
-        reg("DUP_X2", Opcodes.DUP_X2); reg("DUP2", Opcodes.DUP2);
-        reg("DUP2_X1", Opcodes.DUP2_X1); reg("DUP2_X2", Opcodes.DUP2_X2);
+        reg("DCONST_0", Opcodes.DCONST_0);
+        reg("DCONST_1", Opcodes.DCONST_1);
+        reg("IALOAD", Opcodes.IALOAD);
+        reg("LALOAD", Opcodes.LALOAD);
+        reg("FALOAD", Opcodes.FALOAD);
+        reg("DALOAD", Opcodes.DALOAD);
+        reg("AALOAD", Opcodes.AALOAD);
+        reg("BALOAD", Opcodes.BALOAD);
+        reg("CALOAD", Opcodes.CALOAD);
+        reg("SALOAD", Opcodes.SALOAD);
+        reg("IASTORE", Opcodes.IASTORE);
+        reg("LASTORE", Opcodes.LASTORE);
+        reg("FASTORE", Opcodes.FASTORE);
+        reg("DASTORE", Opcodes.DASTORE);
+        reg("AASTORE", Opcodes.AASTORE);
+        reg("BASTORE", Opcodes.BASTORE);
+        reg("CASTORE", Opcodes.CASTORE);
+        reg("SASTORE", Opcodes.SASTORE);
+        reg("POP", Opcodes.POP);
+        reg("POP2", Opcodes.POP2);
+        reg("DUP", Opcodes.DUP);
+        reg("DUP_X1", Opcodes.DUP_X1);
+        reg("DUP_X2", Opcodes.DUP_X2);
+        reg("DUP2", Opcodes.DUP2);
+        reg("DUP2_X1", Opcodes.DUP2_X1);
+        reg("DUP2_X2", Opcodes.DUP2_X2);
         reg("SWAP", Opcodes.SWAP);
-        reg("IADD", Opcodes.IADD); reg("LADD", Opcodes.LADD);
-        reg("FADD", Opcodes.FADD); reg("DADD", Opcodes.DADD);
-        reg("ISUB", Opcodes.ISUB); reg("LSUB", Opcodes.LSUB);
-        reg("FSUB", Opcodes.FSUB); reg("DSUB", Opcodes.DSUB);
-        reg("IMUL", Opcodes.IMUL); reg("LMUL", Opcodes.LMUL);
-        reg("FMUL", Opcodes.FMUL); reg("DMUL", Opcodes.DMUL);
-        reg("IDIV", Opcodes.IDIV); reg("LDIV", Opcodes.LDIV);
-        reg("FDIV", Opcodes.FDIV); reg("DDIV", Opcodes.DDIV);
-        reg("IREM", Opcodes.IREM); reg("LREM", Opcodes.LREM);
-        reg("FREM", Opcodes.FREM); reg("DREM", Opcodes.DREM);
-        reg("INEG", Opcodes.INEG); reg("LNEG", Opcodes.LNEG);
-        reg("FNEG", Opcodes.FNEG); reg("DNEG", Opcodes.DNEG);
-        reg("ISHL", Opcodes.ISHL); reg("LSHL", Opcodes.LSHL);
-        reg("ISHR", Opcodes.ISHR); reg("LSHR", Opcodes.LSHR);
-        reg("IUSHR", Opcodes.IUSHR); reg("LUSHR", Opcodes.LUSHR);
-        reg("IAND", Opcodes.IAND); reg("LAND", Opcodes.LAND);
-        reg("IOR", Opcodes.IOR); reg("LOR", Opcodes.LOR);
-        reg("IXOR", Opcodes.IXOR); reg("LXOR", Opcodes.LXOR);
-        reg("I2L", Opcodes.I2L); reg("I2F", Opcodes.I2F); reg("I2D", Opcodes.I2D);
-        reg("L2I", Opcodes.L2I); reg("L2F", Opcodes.L2F); reg("L2D", Opcodes.L2D);
-        reg("F2I", Opcodes.F2I); reg("F2L", Opcodes.F2L); reg("F2D", Opcodes.F2D);
-        reg("D2I", Opcodes.D2I); reg("D2L", Opcodes.D2L); reg("D2F", Opcodes.D2F);
-        reg("I2B", Opcodes.I2B); reg("I2C", Opcodes.I2C); reg("I2S", Opcodes.I2S);
-        reg("LCMP", Opcodes.LCMP); reg("FCMPL", Opcodes.FCMPL); reg("FCMPG", Opcodes.FCMPG);
-        reg("DCMPL", Opcodes.DCMPL); reg("DCMPG", Opcodes.DCMPG);
-        reg("IRETURN", Opcodes.IRETURN); reg("LRETURN", Opcodes.LRETURN);
-        reg("FRETURN", Opcodes.FRETURN); reg("DRETURN", Opcodes.DRETURN);
-        reg("ARETURN", Opcodes.ARETURN); reg("RETURN", Opcodes.RETURN);
+        reg("IADD", Opcodes.IADD);
+        reg("LADD", Opcodes.LADD);
+        reg("FADD", Opcodes.FADD);
+        reg("DADD", Opcodes.DADD);
+        reg("ISUB", Opcodes.ISUB);
+        reg("LSUB", Opcodes.LSUB);
+        reg("FSUB", Opcodes.FSUB);
+        reg("DSUB", Opcodes.DSUB);
+        reg("IMUL", Opcodes.IMUL);
+        reg("LMUL", Opcodes.LMUL);
+        reg("FMUL", Opcodes.FMUL);
+        reg("DMUL", Opcodes.DMUL);
+        reg("IDIV", Opcodes.IDIV);
+        reg("LDIV", Opcodes.LDIV);
+        reg("FDIV", Opcodes.FDIV);
+        reg("DDIV", Opcodes.DDIV);
+        reg("IREM", Opcodes.IREM);
+        reg("LREM", Opcodes.LREM);
+        reg("FREM", Opcodes.FREM);
+        reg("DREM", Opcodes.DREM);
+        reg("INEG", Opcodes.INEG);
+        reg("LNEG", Opcodes.LNEG);
+        reg("FNEG", Opcodes.FNEG);
+        reg("DNEG", Opcodes.DNEG);
+        reg("ISHL", Opcodes.ISHL);
+        reg("LSHL", Opcodes.LSHL);
+        reg("ISHR", Opcodes.ISHR);
+        reg("LSHR", Opcodes.LSHR);
+        reg("IUSHR", Opcodes.IUSHR);
+        reg("LUSHR", Opcodes.LUSHR);
+        reg("IAND", Opcodes.IAND);
+        reg("LAND", Opcodes.LAND);
+        reg("IOR", Opcodes.IOR);
+        reg("LOR", Opcodes.LOR);
+        reg("IXOR", Opcodes.IXOR);
+        reg("LXOR", Opcodes.LXOR);
+        reg("I2L", Opcodes.I2L);
+        reg("I2F", Opcodes.I2F);
+        reg("I2D", Opcodes.I2D);
+        reg("L2I", Opcodes.L2I);
+        reg("L2F", Opcodes.L2F);
+        reg("L2D", Opcodes.L2D);
+        reg("F2I", Opcodes.F2I);
+        reg("F2L", Opcodes.F2L);
+        reg("F2D", Opcodes.F2D);
+        reg("D2I", Opcodes.D2I);
+        reg("D2L", Opcodes.D2L);
+        reg("D2F", Opcodes.D2F);
+        reg("I2B", Opcodes.I2B);
+        reg("I2C", Opcodes.I2C);
+        reg("I2S", Opcodes.I2S);
+        reg("LCMP", Opcodes.LCMP);
+        reg("FCMPL", Opcodes.FCMPL);
+        reg("FCMPG", Opcodes.FCMPG);
+        reg("DCMPL", Opcodes.DCMPL);
+        reg("DCMPG", Opcodes.DCMPG);
+        reg("IRETURN", Opcodes.IRETURN);
+        reg("LRETURN", Opcodes.LRETURN);
+        reg("FRETURN", Opcodes.FRETURN);
+        reg("DRETURN", Opcodes.DRETURN);
+        reg("ARETURN", Opcodes.ARETURN);
+        reg("RETURN", Opcodes.RETURN);
         reg("ARRAYLENGTH", Opcodes.ARRAYLENGTH);
         reg("ATHROW", Opcodes.ATHROW);
         reg("MONITORENTER", Opcodes.MONITORENTER);
         reg("MONITOREXIT", Opcodes.MONITOREXIT);
 
         // var
-        reg("ILOAD", Opcodes.ILOAD); reg("LLOAD", Opcodes.LLOAD);
-        reg("FLOAD", Opcodes.FLOAD); reg("DLOAD", Opcodes.DLOAD);
+        reg("ILOAD", Opcodes.ILOAD);
+        reg("LLOAD", Opcodes.LLOAD);
+        reg("FLOAD", Opcodes.FLOAD);
+        reg("DLOAD", Opcodes.DLOAD);
         reg("ALOAD", Opcodes.ALOAD);
-        reg("ISTORE", Opcodes.ISTORE); reg("LSTORE", Opcodes.LSTORE);
-        reg("FSTORE", Opcodes.FSTORE); reg("DSTORE", Opcodes.DSTORE);
+        reg("ISTORE", Opcodes.ISTORE);
+        reg("LSTORE", Opcodes.LSTORE);
+        reg("FSTORE", Opcodes.FSTORE);
+        reg("DSTORE", Opcodes.DSTORE);
         reg("ASTORE", Opcodes.ASTORE);
         reg("RET", Opcodes.RET);
 
@@ -115,8 +172,10 @@ final class BytecodeEditSupport {
         reg("INSTANCEOF", Opcodes.INSTANCEOF);
 
         // field
-        reg("GETFIELD", Opcodes.GETFIELD); reg("PUTFIELD", Opcodes.PUTFIELD);
-        reg("GETSTATIC", Opcodes.GETSTATIC); reg("PUTSTATIC", Opcodes.PUTSTATIC);
+        reg("GETFIELD", Opcodes.GETFIELD);
+        reg("PUTFIELD", Opcodes.PUTFIELD);
+        reg("GETSTATIC", Opcodes.GETSTATIC);
+        reg("PUTSTATIC", Opcodes.PUTSTATIC);
 
         // method
         reg("INVOKEVIRTUAL", Opcodes.INVOKEVIRTUAL);
@@ -125,16 +184,24 @@ final class BytecodeEditSupport {
         reg("INVOKEINTERFACE", Opcodes.INVOKEINTERFACE);
 
         // jump
-        reg("IFEQ", Opcodes.IFEQ); reg("IFNE", Opcodes.IFNE);
-        reg("IFLT", Opcodes.IFLT); reg("IFGE", Opcodes.IFGE);
-        reg("IFGT", Opcodes.IFGT); reg("IFLE", Opcodes.IFLE);
-        reg("IF_ICMPEQ", Opcodes.IF_ICMPEQ); reg("IF_ICMPNE", Opcodes.IF_ICMPNE);
-        reg("IF_ICMPLT", Opcodes.IF_ICMPLT); reg("IF_ICMPGE", Opcodes.IF_ICMPGE);
-        reg("IF_ICMPGT", Opcodes.IF_ICMPGT); reg("IF_ICMPLE", Opcodes.IF_ICMPLE);
-        reg("IF_ACMPEQ", Opcodes.IF_ACMPEQ); reg("IF_ACMPNE", Opcodes.IF_ACMPNE);
+        reg("IFEQ", Opcodes.IFEQ);
+        reg("IFNE", Opcodes.IFNE);
+        reg("IFLT", Opcodes.IFLT);
+        reg("IFGE", Opcodes.IFGE);
+        reg("IFGT", Opcodes.IFGT);
+        reg("IFLE", Opcodes.IFLE);
+        reg("IF_ICMPEQ", Opcodes.IF_ICMPEQ);
+        reg("IF_ICMPNE", Opcodes.IF_ICMPNE);
+        reg("IF_ICMPLT", Opcodes.IF_ICMPLT);
+        reg("IF_ICMPGE", Opcodes.IF_ICMPGE);
+        reg("IF_ICMPGT", Opcodes.IF_ICMPGT);
+        reg("IF_ICMPLE", Opcodes.IF_ICMPLE);
+        reg("IF_ACMPEQ", Opcodes.IF_ACMPEQ);
+        reg("IF_ACMPNE", Opcodes.IF_ACMPNE);
         reg("GOTO", Opcodes.GOTO);
         reg("JSR", Opcodes.JSR);
-        reg("IFNULL", Opcodes.IFNULL); reg("IFNONNULL", Opcodes.IFNONNULL);
+        reg("IFNULL", Opcodes.IFNULL);
+        reg("IFNONNULL", Opcodes.IFNONNULL);
 
         // ldc
         reg("LDC", Opcodes.LDC);
@@ -358,8 +425,8 @@ final class BytecodeEditSupport {
             String indyName = args.get(0).getAsString();
             String indyDesc = args.get(1).getAsString();
             String bsmOwner = RouteSupport.internal(args.get(2).getAsString());
-            String bsmName  = args.get(3).getAsString();
-            String bsmDesc  = args.get(4).getAsString();
+            String bsmName = args.get(3).getAsString();
+            String bsmDesc = args.get(4).getAsString();
             Object[] bsmArgs = new Object[args.size() - 5];
             for (int j = 5; j < args.size(); j++) {
                 JsonElement el = args.get(j);
@@ -401,7 +468,8 @@ final class BytecodeEditSupport {
             LabelNode[] caseLabels = new LabelNode[args.size() - 3];
             for (int j = 3; j < args.size(); j++) {
                 int idx = args.get(j).getAsInt();
-                if (idx < 0 || idx >= labels.length) throw new IllegalArgumentException("tableswitch target index out of range: " + idx);
+                if (idx < 0 || idx >= labels.length)
+                    throw new IllegalArgumentException("tableswitch target index out of range: " + idx);
                 caseLabels[j - 3] = labels[idx];
             }
             return new TableSwitchInsnNode(min, max, labels[dfltIdx], caseLabels);
@@ -413,7 +481,8 @@ final class BytecodeEditSupport {
             for (int j = 1; j < args.size(); j += 2) {
                 keys.add(args.get(j).getAsInt());
                 int idx = args.get(j + 1).getAsInt();
-                if (idx < 0 || idx >= labels.length) throw new IllegalArgumentException("lookupswitch target index out of range: " + idx);
+                if (idx < 0 || idx >= labels.length)
+                    throw new IllegalArgumentException("lookupswitch target index out of range: " + idx);
                 caseLabels.add(labels[idx]);
             }
             return new LookupSwitchInsnNode(labels[dfltIdx],
@@ -459,24 +528,25 @@ final class BytecodeEditSupport {
     // ── access flag editing ─────────────────────────────────────────────
 
     static final Map<String, Integer> ACCESS_FLAGS = new LinkedHashMap<>();
+
     static {
-        ACCESS_FLAGS.put("public",       Opcodes.ACC_PUBLIC);
-        ACCESS_FLAGS.put("private",      Opcodes.ACC_PRIVATE);
-        ACCESS_FLAGS.put("protected",    Opcodes.ACC_PROTECTED);
-        ACCESS_FLAGS.put("static",       Opcodes.ACC_STATIC);
-        ACCESS_FLAGS.put("final",        Opcodes.ACC_FINAL);
+        ACCESS_FLAGS.put("public", Opcodes.ACC_PUBLIC);
+        ACCESS_FLAGS.put("private", Opcodes.ACC_PRIVATE);
+        ACCESS_FLAGS.put("protected", Opcodes.ACC_PROTECTED);
+        ACCESS_FLAGS.put("static", Opcodes.ACC_STATIC);
+        ACCESS_FLAGS.put("final", Opcodes.ACC_FINAL);
         ACCESS_FLAGS.put("synchronized", Opcodes.ACC_SYNCHRONIZED);
-        ACCESS_FLAGS.put("volatile",     Opcodes.ACC_VOLATILE);
-        ACCESS_FLAGS.put("transient",    Opcodes.ACC_TRANSIENT);
-        ACCESS_FLAGS.put("native",       Opcodes.ACC_NATIVE);
-        ACCESS_FLAGS.put("interface",    Opcodes.ACC_INTERFACE);
-        ACCESS_FLAGS.put("abstract",     Opcodes.ACC_ABSTRACT);
-        ACCESS_FLAGS.put("strictfp",     Opcodes.ACC_STRICT);
-        ACCESS_FLAGS.put("synthetic",    Opcodes.ACC_SYNTHETIC);
-        ACCESS_FLAGS.put("annotation",   Opcodes.ACC_ANNOTATION);
-        ACCESS_FLAGS.put("enum",         Opcodes.ACC_ENUM);
-        ACCESS_FLAGS.put("bridge",       Opcodes.ACC_BRIDGE);
-        ACCESS_FLAGS.put("varargs",      Opcodes.ACC_VARARGS);
+        ACCESS_FLAGS.put("volatile", Opcodes.ACC_VOLATILE);
+        ACCESS_FLAGS.put("transient", Opcodes.ACC_TRANSIENT);
+        ACCESS_FLAGS.put("native", Opcodes.ACC_NATIVE);
+        ACCESS_FLAGS.put("interface", Opcodes.ACC_INTERFACE);
+        ACCESS_FLAGS.put("abstract", Opcodes.ACC_ABSTRACT);
+        ACCESS_FLAGS.put("strictfp", Opcodes.ACC_STRICT);
+        ACCESS_FLAGS.put("synthetic", Opcodes.ACC_SYNTHETIC);
+        ACCESS_FLAGS.put("annotation", Opcodes.ACC_ANNOTATION);
+        ACCESS_FLAGS.put("enum", Opcodes.ACC_ENUM);
+        ACCESS_FLAGS.put("bridge", Opcodes.ACC_BRIDGE);
+        ACCESS_FLAGS.put("varargs", Opcodes.ACC_VARARGS);
     }
 
     static int applyAccessFlags(int currentAccess, List<String> setFlags, List<String> clearFlags) {
@@ -492,7 +562,7 @@ final class BytecodeEditSupport {
     }
 
     static int editClassAccess(Workspace ws, String className,
-                                List<String> setFlags, List<String> clearFlags) {
+                               List<String> setFlags, List<String> clearFlags) {
         JvmClassInfo cls = findClass(ws, className);
         if (cls == null) return 0;
 
@@ -503,7 +573,7 @@ final class BytecodeEditSupport {
     }
 
     static int editMethodAccess(Workspace ws, RouteSupport.MethodTarget target,
-                                 List<String> setFlags, List<String> clearFlags) {
+                                List<String> setFlags, List<String> clearFlags) {
         ClassNode classNode = readClassNode(target.classInfo());
         for (MethodNode method : classNode.methods) {
             if (!method.name.equals(target.name()) || !method.desc.equals(target.descriptor())) continue;
@@ -515,7 +585,7 @@ final class BytecodeEditSupport {
     }
 
     static int editFieldAccess(Workspace ws, String className, String fieldName,
-                                String descriptor, List<String> setFlags, List<String> clearFlags) {
+                               String descriptor, List<String> setFlags, List<String> clearFlags) {
         JvmClassInfo cls = findClass(ws, className);
         if (cls == null) return 0;
 
@@ -549,7 +619,7 @@ final class BytecodeEditSupport {
     // ── add / remove methods ────────────────────────────────────────────
 
     static int addMethod(Workspace ws, String className, String methodName, String descriptor,
-                          int access, JsonArray instructions) {
+                         int access, JsonArray instructions) {
         JvmClassInfo cls = findClass(ws, className);
         if (cls == null) return 0;
 
@@ -580,7 +650,7 @@ final class BytecodeEditSupport {
     // ── add / remove fields ─────────────────────────────────────────────
 
     static int addField(Workspace ws, String className, String fieldName, String descriptor,
-                         int access, String signature, Object value) {
+                        int access, String signature, Object value) {
         JvmClassInfo cls = findClass(ws, className);
         if (cls == null) return 0;
 
@@ -610,7 +680,7 @@ final class BytecodeEditSupport {
     // ── try-catch blocks ────────────────────────────────────────────────
 
     static int setTryCatchBlocks(Workspace ws, RouteSupport.MethodTarget target,
-                                  JsonArray tcArray) {
+                                 JsonArray tcArray) {
         ClassNode classNode = readClassNode(target.classInfo());
         for (MethodNode method : classNode.methods) {
             if (!method.name.equals(target.name()) || !method.desc.equals(target.descriptor())) continue;
@@ -627,12 +697,12 @@ final class BytecodeEditSupport {
             for (int i = 0; i < tcArray.size(); i++) {
                 JsonObject tc = tcArray.get(i).getAsJsonObject();
                 String start = tc.get("start").getAsString();
-                String end   = tc.get("end").getAsString();
+                String end = tc.get("end").getAsString();
                 String handler = tc.get("handler").getAsString();
-                String type  = tc.has("type") && !tc.get("type").isJsonNull() ? tc.get("type").getAsString() : null;
+                String type = tc.has("type") && !tc.get("type").isJsonNull() ? tc.get("type").getAsString() : null;
                 LabelNode lStart = labels.computeIfAbsent(start, k -> new LabelNode());
-                LabelNode lEnd   = labels.computeIfAbsent(end, k -> new LabelNode());
-                LabelNode lHnd   = labels.computeIfAbsent(handler, k -> new LabelNode());
+                LabelNode lEnd = labels.computeIfAbsent(end, k -> new LabelNode());
+                LabelNode lHnd = labels.computeIfAbsent(handler, k -> new LabelNode());
                 blocks.add(new TryCatchBlockNode(lStart, lEnd, lHnd, type));
             }
 
@@ -661,8 +731,11 @@ final class BytecodeEditSupport {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES) {
             @Override
             protected String getCommonSuperClass(String type1, String type2) {
-                try { return super.getCommonSuperClass(type1, type2); }
-                catch (RuntimeException e) { return "java/lang/Object"; }
+                try {
+                    return super.getCommonSuperClass(type1, type2);
+                } catch (RuntimeException e) {
+                    return "java/lang/Object";
+                }
             }
         };
         classNode.accept(writer);
