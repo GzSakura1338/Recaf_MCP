@@ -4,9 +4,11 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -23,15 +25,19 @@ public class McpHttpServer {
     private static final Logger LOG = Logger.getLogger(McpHttpServer.class.getName());
 
     private final String host;
-    private final int port;
     private final Map<String, Handler> getRoutes = new HashMap<>();
     private final Map<String, Handler> postRoutes = new HashMap<>();
 
+    private volatile int port;
     private HttpServer underlying;
 
     public McpHttpServer(String host, int port) {
         this.host = host;
         this.port = port;
+    }
+
+    public int getPort() {
+        return port;
     }
 
     public void get(String path, Handler handler) {
@@ -42,8 +48,20 @@ public class McpHttpServer {
         postRoutes.put(normalize(path), handler);
     }
 
-    public void start() throws IOException {
-        underlying = HttpServer.create(new InetSocketAddress(host, port), 0);
+    public void start(int portSpan, Set<Integer> reservedPorts) throws IOException {
+        int firstPort = port;
+        for (int offset = 0; offset < portSpan && underlying == null; offset++) {
+            int candidate = firstPort + offset;
+            if (reservedPorts.contains(candidate)) continue;
+            try {
+                underlying = HttpServer.create(new InetSocketAddress(host, candidate), 0);
+                port = candidate;
+            } catch (BindException ignored) {
+            }
+        }
+        if (underlying == null) {
+            throw new BindException("no free port in " + firstPort + ".." + (firstPort + portSpan - 1));
+        }
         underlying.setExecutor(Executors.newFixedThreadPool(4, r -> {
             Thread t = new Thread(r, "recaf-mcp-http");
             t.setDaemon(true);

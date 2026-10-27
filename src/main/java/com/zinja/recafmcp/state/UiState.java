@@ -1,65 +1,114 @@
 package com.zinja.recafmcp.state;
 
-import software.coley.recaf.services.workspace.WorkspaceCloseListener;
-import software.coley.recaf.services.workspace.WorkspaceManager;
-import software.coley.recaf.services.workspace.WorkspaceOpenListener;
-import software.coley.recaf.workspace.model.Workspace;
+import jakarta.enterprise.inject.Instance;
+import javafx.application.Platform;
+import javafx.scene.Node;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.stage.Window;
+import org.fxmisc.richtext.CodeArea;
+import software.coley.bentofx.dockable.Dockable;
+import software.coley.bentofx.layout.container.DockContainerLeaf;
+import software.coley.recaf.services.navigation.ClassNavigable;
+import software.coley.recaf.ui.docking.DockingManager;
 
-/**
- * Tracks UI-adjacent state that the HTTP endpoints expose: the currently
- * focused class (active editor tab) and the user's current text selection.
- * <p>
- * For an initial scaffold this only listens for workspace open/close — the UI
- * layer (ContentPane / DockingTab) hasn't been wired in yet. Filling in the
- * JavaFX side is TODO:
- * <p>
- * 1. Listen to Recaf's docking system for tab focus changes and push the
- * active {@code ClassPathNode} into {@link #setCurrentClassName(String)}.
- * 2. Listen to the active editor's {@code CodeArea.caretSelectionBind}
- * and push into {@link #setSelectedText(String)}.
- * <p>
- * The docking API lives in {@code software.coley.recaf.ui.docking.DockingManager};
- * the editor hook lives on {@code AbstractContentPane}.
- */
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
+
 public class UiState {
-    private final WorkspaceOpenListener openListener = this::onWorkspaceOpen;
-    private final WorkspaceCloseListener closeListener = this::onWorkspaceClose;
+    private static final long FX_TIMEOUT_SECONDS = 5;
 
-    private volatile String currentClassName;
-    private volatile String selectedText;
+    private final Instance<DockingManager> dockingManager;
 
-    public void install(WorkspaceManager manager) {
-        manager.addWorkspaceOpenListener(openListener);
-        manager.addWorkspaceCloseListener(closeListener);
+    public UiState(Instance<DockingManager> dockingManager) {
+        this.dockingManager = dockingManager;
     }
 
-    public void uninstall(WorkspaceManager manager) {
-        manager.removeWorkspaceOpenListener(openListener);
-        manager.removeWorkspaceCloseListener(closeListener);
+    public String getCurrentClassName() throws Exception {
+        return onFxThread(() -> {
+            Node pane = currentClassPane();
+            return pane == null ? null : ((ClassNavigable) pane).getClassPath().getValue().getName();
+        });
     }
 
-    public String getCurrentClassName() {
-        return currentClassName;
+    public String getSelectedText() throws Exception {
+        return onFxThread(() -> {
+            String selection = selectionOf((CodeArea) focusedAncestor(CodeArea.class::isInstance));
+            if (selection != null) return selection;
+
+            Node pane = currentClassPane();
+            if (pane == null) return null;
+            List<CodeArea> areas = new ArrayList<>();
+            collectCodeAreas(pane, areas);
+            for (CodeArea area : areas) {
+                selection = selectionOf(area);
+                if (selection != null) return selection;
+            }
+            return null;
+        });
     }
 
-    public void setCurrentClassName(String currentClassName) {
-        this.currentClassName = currentClassName;
+    private Node currentClassPane() {
+        Node focused = focusedAncestor(ClassNavigable.class::isInstance);
+        if (focused != null) return focused;
+
+        if (!dockingManager.isResolvable()) return null;
+        DockContainerLeaf primary = dockingManager.get().getPrimaryDockingContainer();
+        Dockable selected = primary == null ? null : primary.getSelectedDockable();
+        return selected != null && selected.getNode() instanceof ClassNavigable ? selected.getNode() : null;
     }
 
-    public String getSelectedText() {
-        return selectedText;
+    private static Node focusedAncestor(Predicate<Node> match) {
+        List<Window> windows = new ArrayList<>(Window.getWindows());
+        windows.removeIf(window -> !window.isShowing());
+        windows.sort(Comparator.comparing(window -> !window.isFocused()));
+        for (Window window : windows) {
+            Scene scene = window.getScene();
+            for (Node node = scene == null ? null : scene.getFocusOwner(); node != null; node = node.getParent()) {
+                if (match.test(node)) return node;
+            }
+        }
+        return null;
     }
 
-    public void setSelectedText(String selectedText) {
-        this.selectedText = selectedText;
+    private static void collectCodeAreas(Node node, List<CodeArea> out) {
+        if (node instanceof CodeArea area) {
+            out.add(area);
+        } else if (node instanceof Parent parent) {
+            for (Node child : parent.getChildrenUnmodifiable()) collectCodeAreas(child, out);
+        }
     }
 
-    private void onWorkspaceOpen(Workspace workspace) {
-        // Nothing to seed yet; the docking listener will push the first class.
+    private static String selectionOf(CodeArea area) {
+        if (area == null) return null;
+        String text = area.getSelectedText();
+        return text == null || text.isEmpty() ? null : text;
     }
 
-    private void onWorkspaceClose(Workspace workspace) {
-        currentClassName = null;
-        selectedText = null;
+    private static <T> T onFxThread(Callable<T> action) throws Exception {
+        if (Platform.isFxApplicationThread()) return action.call();
+
+        CompletableFuture<T> future = new CompletableFuture<>();
+        Platform.runLater(() -> {
+            try {
+                future.complete(action.call());
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        try {
+            return future.get(FX_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            throw new IllegalStateException("Recaf UI thread did not respond within " + FX_TIMEOUT_SECONDS + "s");
+        } catch (ExecutionException e) {
+            throw e.getCause() instanceof Exception cause ? cause : e;
+        }
     }
 }

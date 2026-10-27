@@ -32,6 +32,11 @@ A Java plugin runs inside Recaf exposing a local HTTP API; a Python MCP server t
 
 ## Tools
 
+Every tool below also accepts an optional `window` argument; see [Multiple Recaf Windows](#multiple-recaf-windows).
+
+### Recaf Windows
+`list_recaf_windows` `switch_recaf_window` `open_recaf_window`
+
 ### Workspace
 `get_workspace_info` `open_workspace` `close_workspace` `add_supporting_resource` `list_supporting_resources` `fetch_current_class` `get_selected_text`
 
@@ -156,7 +161,7 @@ Or use the launcher script:
 
 | Component | Address |
 |---|---|
-| Plugin HTTP | `127.0.0.1:8750` |
+| Plugin HTTP | `127.0.0.1:8750` (first Recaf), then the next free port up to `8769`, skipping `8751` |
 | MCP HTTP | `127.0.0.1:8751/mcp` |
 
 Health check:
@@ -164,6 +169,27 @@ Health check:
 ```powershell
 Invoke-WebRequest http://127.0.0.1:8750/health
 ```
+
+---
+
+## Multiple Recaf Windows
+
+Several Recaf processes can run at once, each with its own jar. Each one loads the plugin, which binds the first free port from `8750`; the MCP server finds them all and numbers them in the order it first sees them. A number is never reused while the MCP server runs, so `2:client.jar` can not silently turn into a different jar.
+
+| Tool | Purpose |
+|---|---|
+| `list_recaf_windows` | List windows as `1:client.jar`, `2:server.jar`, … and show the default one |
+| `switch_recaf_window(window)` | Make a window the default for calls that do not pass `window` |
+| `open_recaf_window(jar_path?, wait_seconds?)` | Start another Recaf, optionally opening a jar in it. The default window is left unchanged |
+
+Every other tool takes an optional `window`: `"2"`, `"2:client.jar"`, or a unique part of the jar name. If a jar name is given with the number it must match, so a stale reference is rejected instead of editing the wrong jar.
+
+- With exactly one window open, `window` can be omitted.
+- With several open and no default chosen, a call fails with the list of windows instead of guessing.
+- The default set by `switch_recaf_window` is shared by every client of the MCP server (the HTTP transport has no per-client session). When several agents work in parallel, have each pass `window` explicitly.
+- `open_recaf_window` starts the new Recaf the same way an open window was started (same `java` and jar, read from its process). With no window open it uses `--recaf-jar`, then `RECAF_JAR`, then `libs/recaf.jar`.
+
+Windows that still run an older plugin without `/instance` are found too, but cannot be cloned by `open_recaf_window`.
 
 ---
 

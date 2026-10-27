@@ -17,13 +17,56 @@ Default ports:
 """
 
 import argparse
+import functools
+import inspect
 import logging
 import sys
+from typing import Annotated
 from fastmcp import FastMCP
+from pydantic import Field
 from src.banner import recaf_mcp_server_banner
-from src.server import config, tools
+from src.server import config, tools, windows
 
-mcp = FastMCP("Recaf MCP Plugin Reverse Engineering Server")
+INSTRUCTIONS = (
+    "Several Recaf windows (processes) can be open at once, each with its own jar. "
+    "Call list_recaf_windows to see them as '<number>:<jar name>' (e.g. '2:client.jar'); "
+    "open_recaf_window starts another one (optionally with a jar). "
+    "Every other tool takes an optional `window` argument ('2' or '2:client.jar') to pick the "
+    "window for that single call. switch_recaf_window sets a default that is shared by every "
+    "client of this server, so when several agents work in parallel always pass `window` "
+    "explicitly. With exactly one window open, `window` can be omitted. Tools that modify a "
+    "workspace act only on the selected window."
+)
+
+mcp = FastMCP("Recaf MCP Plugin Reverse Engineering Server", instructions=INSTRUCTIONS)
+
+WINDOW_DESCRIPTION = (
+    "Recaf window to use: '<number>' or '<number>:<jar name>' as shown by list_recaf_windows. "
+    "Omit to use the default set by switch_recaf_window (or the only open window)."
+)
+
+
+def recaf_tool(fn):
+    """Register `fn` as an MCP tool and give it an optional `window` argument."""
+    signature = inspect.signature(fn)
+    window_type = Annotated[str, Field(description=WINDOW_DESCRIPTION)]
+    window_param = inspect.Parameter(
+        "window", inspect.Parameter.KEYWORD_ONLY, default="", annotation=window_type
+    )
+
+    @functools.wraps(fn)
+    async def wrapper(*args, window: str = "", **kwargs):
+        token = windows.requested_window.set(window or "")
+        try:
+            return await fn(*args, **kwargs)
+        finally:
+            windows.requested_window.reset(token)
+
+    wrapper.__signature__ = signature.replace(
+        parameters=[*signature.parameters.values(), window_param]
+    )
+    wrapper.__annotations__ = {**inspect.get_annotations(fn), "window": window_type}
+    return mcp.tool()(wrapper)
 
 # Bootstrap logger — always writes to stderr to keep stdout clean for stdio transport
 logger = logging.getLogger("recaf-mcp-server.bootstrap")
@@ -54,46 +97,79 @@ from src.server.tools import (
 
 
 # =============================================================================
-# Workspace
+# Recaf windows
 # =============================================================================
 
 @mcp.tool()
+async def list_recaf_windows() -> dict:
+    """List every open Recaf window as '<number>:<jar name>' and which one is the default."""
+    try:
+        return await windows.list_windows()
+    except windows.WindowError as e:
+        return e.payload()
+
+
+@mcp.tool()
+async def switch_recaf_window(window: str) -> dict:
+    """Make a Recaf window the default for calls without `window`. `window` is '2' or '2:client.jar'."""
+    try:
+        return await windows.switch(window)
+    except windows.WindowError as e:
+        return e.payload()
+
+
+@mcp.tool()
+async def open_recaf_window(jar_path: str = "", wait_seconds: int = 60) -> dict:
+    """
+    Start a new Recaf window (a separate Recaf process) and optionally open a jar in it.
+
+    Returns the new window as '<number>:<jar name>'; pass that as `window` to the other tools.
+    The default window is not changed. Waits up to `wait_seconds` for Recaf to finish loading.
+    """
+    return await tools.workspace_tools.open_recaf_window(jar_path, wait_seconds)
+
+
+# =============================================================================
+# Workspace
+# =============================================================================
+
+@recaf_tool
 async def get_workspace_info() -> dict:
     """Return metadata about the currently loaded Recaf workspace."""
     return await tools.workspace_tools.get_workspace_info()
 
 
-@mcp.tool()
+@recaf_tool
 async def open_workspace(path: str) -> dict:
     """Load a JAR/class/directory into Recaf as the primary workspace resource."""
     return await tools.workspace_tools.open_workspace(path)
 
 
-@mcp.tool()
+@recaf_tool
 async def close_workspace() -> dict:
     """Close the current workspace without exporting."""
     return await tools.workspace_tools.close_workspace()
 
 
-@mcp.tool()
+@recaf_tool
 async def add_supporting_resource(path: str) -> dict:
     """Attach a supporting library JAR to the workspace for inheritance/xref resolution."""
     return await tools.workspace_tools.add_supporting_resource(path)
 
 
-@mcp.tool()
+@recaf_tool
 async def list_supporting_resources() -> dict:
     """List all supporting resources (library JARs) attached to the workspace."""
     return await tools.workspace_tools.list_supporting_resources()
 
 
-@mcp.tool()
+@recaf_tool
 async def fetch_current_class() -> dict:
     """Fetch the class currently focused in the Recaf UI (active editor tab)."""
     return await tools.workspace_tools.fetch_current_class()
 
 
-@mcp.tool()
+@recaf_tool
 async def get_selected_text() -> dict:
     """Return the text currently selected in the active Recaf editor."""
     return await tools.workspace_tools.get_selected_text()
@@ -103,55 +179,55 @@ async def get_selected_text() -> dict:
 # Classes
 # =============================================================================
 
-@mcp.tool()
+@recaf_tool
 async def get_all_classes(offset: int = 0, count: int = 0) -> dict:
     """Paginated listing of every class in the primary resource."""
     return await tools.class_tools.get_all_classes(offset, count)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_class_info(class_name: str) -> dict:
     """Basic metadata for a class: access flags, supertypes, counts, annotations."""
     return await tools.class_tools.get_class_info(class_name)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_class_source(class_name: str, decompiler: str = "") -> dict:
     """Decompile a class to Java source. Optional decompiler id overrides the default."""
     return await tools.class_tools.get_class_source(class_name, decompiler)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_bytecode_of_class(class_name: str) -> dict:
     """Disassembled bytecode view of a class (Recaf's equivalent of smali)."""
     return await tools.class_tools.get_bytecode_of_class(class_name)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_methods_of_class(class_name: str) -> dict:
     """List every method on a class with name, JVM descriptor, and access flags."""
     return await tools.class_tools.get_methods_of_class(class_name)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_fields_of_class(class_name: str) -> dict:
     """List every field on a class with name, JVM descriptor, and access flags."""
     return await tools.class_tools.get_fields_of_class(class_name)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_inner_classes(class_name: str) -> dict:
     """List inner/nested class names declared within the given class."""
     return await tools.class_tools.get_inner_classes(class_name)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_annotations_of_class(class_name: str) -> dict:
     """All annotations (visible and invisible) attached to the class."""
     return await tools.class_tools.get_annotations_of_class(class_name)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_raw_class_bytes(class_name: str) -> dict:
     """Base64-encoded raw class file bytes for external tooling."""
     return await tools.class_tools.get_raw_class_bytes(class_name)
@@ -161,19 +237,19 @@ async def get_raw_class_bytes(class_name: str) -> dict:
 # Methods
 # =============================================================================
 
-@mcp.tool()
+@recaf_tool
 async def get_method_by_name(class_name: str, method_name: str, descriptor: str = "") -> dict:
     """Decompiled source of a single method (optionally disambiguated by descriptor)."""
     return await tools.method_tools.get_method_by_name(class_name, method_name, descriptor)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_method_bytecode(class_name: str, method_name: str, descriptor: str = "") -> dict:
     """Disassembled bytecode for a single method (instructions, locals, try/catch)."""
     return await tools.method_tools.get_method_bytecode(class_name, method_name, descriptor)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_method_info(class_name: str, method_name: str, descriptor: str = "") -> dict:
     """Method metadata: access, signature, exceptions, locals, line numbers."""
     return await tools.method_tools.get_method_info(class_name, method_name, descriptor)
@@ -183,7 +259,7 @@ async def get_method_info(class_name: str, method_name: str, descriptor: str = "
 # Search
 # =============================================================================
 
-@mcp.tool()
+@recaf_tool
 async def search_classes_by_name(
     pattern: str,
     use_regex: bool = False,
@@ -197,7 +273,7 @@ async def search_classes_by_name(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def search_members_by_name(
     pattern: str,
     kind: str = "any",
@@ -212,7 +288,7 @@ async def search_members_by_name(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def search_strings(
     pattern: str,
     use_regex: bool = False,
@@ -226,13 +302,13 @@ async def search_strings(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def search_numbers(value: str, offset: int = 0, count: int = 50) -> dict:
     """Search numeric constants (int/long/float/double) appearing in bytecode."""
     return await tools.search_tools.search_numbers(value, offset, count)
 
 
-@mcp.tool()
+@recaf_tool
 async def search_instructions(
     opcode: str = "",
     operand: str = "",
@@ -250,13 +326,13 @@ async def search_instructions(
 # Cross-references
 # =============================================================================
 
-@mcp.tool()
+@recaf_tool
 async def get_xrefs_to_class(class_name: str, offset: int = 0, count: int = 20) -> dict:
     """Find every location that references a class."""
     return await tools.xrefs_tools.get_xrefs_to_class(class_name, offset, count)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_xrefs_to_method(
     class_name: str,
     method_name: str,
@@ -270,7 +346,7 @@ async def get_xrefs_to_method(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def get_xrefs_to_field(
     class_name: str,
     field_name: str,
@@ -284,7 +360,7 @@ async def get_xrefs_to_field(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def get_callers_of_method(
     class_name: str,
     method_name: str,
@@ -298,7 +374,7 @@ async def get_callers_of_method(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def get_callees_of_method(
     class_name: str,
     method_name: str,
@@ -312,7 +388,7 @@ async def get_callees_of_method(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def get_overrides_of_method(
     class_name: str,
     method_name: str,
@@ -330,13 +406,13 @@ async def get_overrides_of_method(
 # Refactor
 # =============================================================================
 
-@mcp.tool()
+@recaf_tool
 async def rename_class(class_name: str, new_name: str) -> dict:
     """Rename a class across the entire workspace."""
     return await tools.refactor_tools.rename_class(class_name, new_name)
 
 
-@mcp.tool()
+@recaf_tool
 async def rename_method(
     class_name: str,
     method_name: str,
@@ -350,7 +426,7 @@ async def rename_method(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def rename_field(
     class_name: str,
     field_name: str,
@@ -363,13 +439,13 @@ async def rename_field(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def rename_package(old_package_name: str, new_package_name: str) -> dict:
     """Rename a package prefix and move every class under it."""
     return await tools.refactor_tools.rename_package(old_package_name, new_package_name)
 
 
-@mcp.tool()
+@recaf_tool
 async def rename_local_variable(
     class_name: str,
     method_name: str,
@@ -384,7 +460,7 @@ async def rename_local_variable(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def apply_mappings(mappings_text: str, format: str = "tiny-v2") -> dict:
     """Bulk-apply a mapping file (Proguard/SRG/TSRG/Tiny v1-v2/Enigma)."""
     return await tools.refactor_tools.apply_mappings(mappings_text, format)
@@ -394,19 +470,19 @@ async def apply_mappings(mappings_text: str, format: str = "tiny-v2") -> dict:
 # Decompilers
 # =============================================================================
 
-@mcp.tool()
+@recaf_tool
 async def list_decompilers() -> dict:
     """List decompilers registered in Recaf's DecompilerManager."""
     return await tools.decompile_tools.list_decompilers()
 
 
-@mcp.tool()
+@recaf_tool
 async def set_active_decompiler(name: str) -> dict:
     """Set the workspace-wide default decompiler (cfr / vineflower / procyon)."""
     return await tools.decompile_tools.set_active_decompiler(name)
 
 
-@mcp.tool()
+@recaf_tool
 async def decompile_class_with(class_name: str, decompiler: str) -> dict:
     """One-shot decompile with an explicit decompiler; workspace default unchanged."""
     return await tools.decompile_tools.decompile_class_with(class_name, decompiler)
@@ -416,31 +492,31 @@ async def decompile_class_with(class_name: str, decompiler: str) -> dict:
 # Inheritance
 # =============================================================================
 
-@mcp.tool()
+@recaf_tool
 async def get_superclasses(class_name: str) -> dict:
     """Walk from the class up to java.lang.Object."""
     return await tools.inheritance_tools.get_superclasses(class_name)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_interfaces(class_name: str) -> dict:
     """All interfaces implemented by the class (direct + transitive)."""
     return await tools.inheritance_tools.get_interfaces(class_name)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_direct_subclasses(class_name: str, offset: int = 0, count: int = 50) -> dict:
     """Classes that directly extend the given class (one level down)."""
     return await tools.inheritance_tools.get_direct_subclasses(class_name, offset, count)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_all_subclasses(class_name: str, offset: int = 0, count: int = 200) -> dict:
     """All transitive descendants of the given class."""
     return await tools.inheritance_tools.get_all_subclasses(class_name, offset, count)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_implementors(interface_name: str, offset: int = 0, count: int = 200) -> dict:
     """All classes that implement the given interface."""
     return await tools.inheritance_tools.get_implementors(interface_name, offset, count)
@@ -450,25 +526,25 @@ async def get_implementors(interface_name: str, offset: int = 0, count: int = 20
 # File resources (non-class files in the jar)
 # =============================================================================
 
-@mcp.tool()
+@recaf_tool
 async def get_all_file_names(offset: int = 0, count: int = 0) -> dict:
     """Paginated list of every non-class file path in the primary resource."""
     return await tools.resource_tools.get_all_file_names(offset, count)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_file_content(file_path: str) -> dict:
     """Retrieve the content of a file inside the primary resource."""
     return await tools.resource_tools.get_file_content(file_path)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_manifest() -> dict:
     """Parsed META-INF/MANIFEST.MF (main attributes + per-entry attributes)."""
     return await tools.resource_tools.get_manifest()
 
 
-@mcp.tool()
+@recaf_tool
 async def get_strings_from_resources(offset: int = 0, count: int = 0) -> dict:
     """Extract printable strings from non-class binary resources."""
     return await tools.resource_tools.get_strings_from_resources(offset, count)
@@ -478,19 +554,19 @@ async def get_strings_from_resources(offset: int = 0, count: int = 0) -> dict:
 # Export
 # =============================================================================
 
-@mcp.tool()
+@recaf_tool
 async def export_workspace(output_path: str, include_supporting: bool = False) -> dict:
     """Write the (possibly modified) primary resource back to disk."""
     return await tools.export_tools.export_workspace(output_path, include_supporting)
 
 
-@mcp.tool()
+@recaf_tool
 async def get_modified_classes() -> dict:
     """List classes that have been modified relative to their original bytes."""
     return await tools.export_tools.get_modified_classes()
 
 
-@mcp.tool()
+@recaf_tool
 async def revert_class(class_name: str) -> dict:
     """Discard in-memory modifications to a class and restore the original bytes."""
     return await tools.export_tools.revert_class(class_name)
@@ -500,7 +576,7 @@ async def revert_class(class_name: str) -> dict:
 # Bytecode Edit
 # =============================================================================
 
-@mcp.tool()
+@recaf_tool
 async def list_method_instructions(
     class_name: str, method_name: str, descriptor: str = ""
 ) -> dict:
@@ -510,7 +586,7 @@ async def list_method_instructions(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def replace_method_body(
     class_name: str,
     method_name: str,
@@ -528,7 +604,7 @@ async def replace_method_body(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def replace_instruction(
     class_name: str,
     method_name: str,
@@ -542,7 +618,7 @@ async def replace_instruction(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def insert_instruction(
     class_name: str,
     method_name: str,
@@ -556,7 +632,7 @@ async def insert_instruction(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def remove_instruction(
     class_name: str,
     method_name: str,
@@ -569,7 +645,7 @@ async def remove_instruction(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def assemble_method(
     class_name: str,
     method_name: str,
@@ -587,7 +663,7 @@ async def assemble_method(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def edit_class_access(
     class_name: str,
     set_flags: list = None,
@@ -599,7 +675,7 @@ async def edit_class_access(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def edit_method_access(
     class_name: str,
     method_name: str,
@@ -613,7 +689,7 @@ async def edit_method_access(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def edit_field_access(
     class_name: str,
     field_name: str,
@@ -627,13 +703,13 @@ async def edit_field_access(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def replace_class_bytes(class_name: str, bytes_base64: str) -> dict:
     """Replace a class entirely from base64-encoded class file bytes."""
     return await tools.bytecode_edit_tools.replace_class_bytes(class_name, bytes_base64)
 
 
-@mcp.tool()
+@recaf_tool
 async def add_method(
     class_name: str,
     method_name: str,
@@ -647,7 +723,7 @@ async def add_method(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def remove_method(
     class_name: str, method_name: str, descriptor: str = ""
 ) -> dict:
@@ -657,7 +733,7 @@ async def remove_method(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def add_field(
     class_name: str,
     field_name: str,
@@ -672,7 +748,7 @@ async def add_field(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def remove_field(
     class_name: str, field_name: str, descriptor: str = ""
 ) -> dict:
@@ -682,7 +758,7 @@ async def remove_field(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def set_try_catch_blocks(
     class_name: str,
     method_name: str,
@@ -699,7 +775,7 @@ async def set_try_catch_blocks(
     )
 
 
-@mcp.tool()
+@recaf_tool
 async def save_workspace(output_path: str) -> dict:
     """Export the (possibly modified) workspace back to disk."""
     return await tools.bytecode_edit_tools.save_workspace(output_path)
@@ -732,9 +808,17 @@ def main():
     )
     parser.add_argument(
         "--recaf-port",
-        help="Recaf MCP plugin port (default: 8750)",
+        help="First Recaf MCP plugin port to scan (default: 8750). Every Recaf window "
+             "binds the first free port from there, so %d ports are scanned." % windows.PORT_SPAN,
         default=8750,
         type=int,
+    )
+    parser.add_argument(
+        "--recaf-jar",
+        help="recaf.jar used by open_recaf_window. Without it, a new window is started the same "
+             "way as an already open one (same java and jar), then RECAF_JAR, libs/recaf.jar.",
+        default=None,
+        type=str,
     )
     parser.add_argument(
         "--recaf-host",
@@ -747,6 +831,8 @@ def main():
 
     config.set_recaf_host(args.recaf_host)
     config.set_recaf_port(args.recaf_port)
+    config.set_mcp_port(args.port)
+    windows.set_launch_jar(args.recaf_jar)
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         logger.warning(
@@ -767,7 +853,7 @@ def main():
             args.recaf_port,
         )
 
-    logger.info("Testing Recaf MCP Plugin connectivity...")
+    logger.info("Looking for Recaf windows...")
     result = config.health_ping()
     logger.info("Health check result: %s", result)
 

@@ -10,7 +10,6 @@ import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.services.workspace.io.ResourceImporter;
 import software.coley.recaf.workspace.model.BasicWorkspace;
 import software.coley.recaf.workspace.model.Workspace;
-import software.coley.recaf.workspace.model.resource.WorkspaceFileResource;
 import software.coley.recaf.workspace.model.resource.WorkspaceResource;
 
 import java.nio.file.Files;
@@ -109,7 +108,7 @@ public class WorkspaceRoutes {
         server.get("/current-class", (req, res) -> {
             String name = uiState.getCurrentClassName();
             JsonObject out = new JsonObject();
-            out.addProperty("class_name", name);
+            out.addProperty("class_name", RouteSupport.external(name));
             if (name != null) {
                 Workspace ws = wm.getCurrent();
                 out.addProperty("found", ws != null && ws.findJvmClass(name) != null);
@@ -153,10 +152,7 @@ public class WorkspaceRoutes {
             return out;
         }
 
-        Path path = resource.getPropertyValueOrNull(InputFilePathProperty.KEY);
-        if (path == null && resource instanceof WorkspaceFileResource fileResource) {
-            path = InputFilePathProperty.get(fileResource.getFileInfo());
-        }
+        Path path = RouteSupport.resourcePath(resource);
         out.addProperty("type", resource.getClass().getSimpleName());
         if (path != null) {
             out.addProperty("path", path.toString());

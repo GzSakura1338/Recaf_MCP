@@ -32,6 +32,11 @@ Java 插件运行在 Recaf 内部，暴露本地 HTTP API；Python MCP 服务器
 
 ## 工具列表
 
+下面所有工具都带一个可选的 `window` 参数，见[多 Recaf 窗口](#多-recaf-窗口)。
+
+### Recaf 窗口
+`list_recaf_windows` `switch_recaf_window` `open_recaf_window`
+
 ### 工作区
 `get_workspace_info` `open_workspace` `close_workspace` `add_supporting_resource` `list_supporting_resources` `fetch_current_class` `get_selected_text`
 
@@ -156,7 +161,7 @@ python recaf_mcp_server.py --http --port 8751
 
 | 组件 | 地址 |
 |---|---|
-| 插件 HTTP | `127.0.0.1:8750` |
+| 插件 HTTP | 第一个 Recaf 用 `127.0.0.1:8750`，之后依次取下一个空闲端口，最多到 `8769`，跳过 `8751` |
 | MCP HTTP | `127.0.0.1:8751/mcp` |
 
 健康检查：
@@ -164,6 +169,27 @@ python recaf_mcp_server.py --http --port 8751
 ```powershell
 Invoke-WebRequest http://127.0.0.1:8750/health
 ```
+
+---
+
+## 多 Recaf 窗口
+
+可以同时运行多个 Recaf 进程，各自打开不同的 jar。每个进程都会加载插件，并从 `8750` 起绑定第一个空闲端口；MCP 服务按首次发现的顺序给它们编号。编号在 MCP 服务运行期间不会复用，所以 `2:client.jar` 不会悄悄变成另一个 jar。
+
+| 工具 | 作用 |
+|---|---|
+| `list_recaf_windows` | 列出所有窗口，形如 `1:client.jar`、`2:server.jar`，并标出默认窗口 |
+| `switch_recaf_window(window)` | 把某个窗口设为默认，之后不带 `window` 的调用都走它 |
+| `open_recaf_window(jar_path?, wait_seconds?)` | 再开一个 Recaf，可顺带打开一个 jar；不会改动默认窗口 |
+
+其余工具都有可选参数 `window`：填 `"2"`、`"2:client.jar"`，或者 jar 名里能唯一匹配的一段。编号后面带了 jar 名时必须和该窗口当前的 jar 对得上，过期的引用会被拒绝，而不是改错 jar。
+
+- 只开了一个窗口时，可以不传 `window`。
+- 开了多个窗口又没选默认窗口时，调用会失败并返回窗口列表，不会猜。
+- `switch_recaf_window` 设置的默认窗口由 MCP 服务的所有客户端共享（HTTP 传输没有按客户端区分的会话）。多个 agent 并行时，请各自显式传 `window`。
+- `open_recaf_window` 会按已有窗口的启动方式（同一个 `java` 和 jar，从其进程里读取）再开一个。没有任何窗口时，依次用 `--recaf-jar`、`RECAF_JAR`、`libs/recaf.jar`。
+
+仍在用旧版插件（没有 `/instance`）的窗口也能被发现，但不能被 `open_recaf_window` 当作克隆模板。
 
 ---
 

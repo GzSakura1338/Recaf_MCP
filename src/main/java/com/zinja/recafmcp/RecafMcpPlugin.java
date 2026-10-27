@@ -4,6 +4,7 @@ import com.zinja.recafmcp.http.McpHttpServer;
 import com.zinja.recafmcp.routes.*;
 import com.zinja.recafmcp.state.UiState;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import software.coley.recaf.plugin.Plugin;
 import software.coley.recaf.plugin.PluginInformation;
@@ -15,7 +16,9 @@ import software.coley.recaf.services.mapping.format.MappingFormatManager;
 import software.coley.recaf.services.search.SearchService;
 import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.services.workspace.io.ResourceImporter;
+import software.coley.recaf.ui.docking.DockingManager;
 
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -33,6 +36,8 @@ public class RecafMcpPlugin implements Plugin {
     private static final Logger LOG = Logger.getLogger(RecafMcpPlugin.class.getName());
     private static final String DEFAULT_HOST = "127.0.0.1";
     private static final int DEFAULT_PORT = 8750;
+    private static final int PORT_SPAN = 20;
+    private static final Set<Integer> RESERVED_PORTS = Set.of(8751);
 
     private final WorkspaceManager workspaceManager;
     private final ResourceImporter resourceImporter;
@@ -42,9 +47,9 @@ public class RecafMcpPlugin implements Plugin {
     private final MappingApplierService mappingApplierService;
     private final MappingFormatManager mappingFormatManager;
     private final InheritanceGraphService inheritanceGraphService;
+    private final Instance<DockingManager> dockingManager;
 
     private McpHttpServer server;
-    private UiState uiState;
 
     @Inject
     public RecafMcpPlugin(WorkspaceManager workspaceManager,
@@ -54,7 +59,8 @@ public class RecafMcpPlugin implements Plugin {
                           SearchService searchService,
                           MappingApplierService mappingApplierService,
                           MappingFormatManager mappingFormatManager,
-                          InheritanceGraphService inheritanceGraphService) {
+                          InheritanceGraphService inheritanceGraphService,
+                          Instance<DockingManager> dockingManager) {
         this.workspaceManager = workspaceManager;
         this.resourceImporter = resourceImporter;
         this.decompilerManager = decompilerManager;
@@ -63,6 +69,7 @@ public class RecafMcpPlugin implements Plugin {
         this.mappingApplierService = mappingApplierService;
         this.mappingFormatManager = mappingFormatManager;
         this.inheritanceGraphService = inheritanceGraphService;
+        this.dockingManager = dockingManager;
     }
 
     @Override
@@ -70,13 +77,10 @@ public class RecafMcpPlugin implements Plugin {
         String host = System.getProperty("recaf.mcp.host", DEFAULT_HOST);
         int port = Integer.getInteger("recaf.mcp.port", DEFAULT_PORT);
 
-        uiState = new UiState();
-        uiState.install(workspaceManager);
-
         server = new McpHttpServer(host, port);
         server.get("/health", (req, res) -> res.text("ok"));
 
-        new WorkspaceRoutes(workspaceManager, resourceImporter, uiState).register(server);
+        new WorkspaceRoutes(workspaceManager, resourceImporter, new UiState(dockingManager)).register(server);
         new ClassRoutes(workspaceManager).register(server);
         new MethodRoutes(workspaceManager, decompilerManager).register(server);
         new SearchRoutes(workspaceManager, searchService).register(server);
@@ -88,11 +92,12 @@ public class RecafMcpPlugin implements Plugin {
         new FilesRoutes(workspaceManager).register(server);
         new ExportRoutes(workspaceManager).register(server);
         new BytecodeEditRoutes(workspaceManager).register(server);
+        new InstanceRoutes(workspaceManager, server).register(server);
         server.get("/__plugin_diag__", (req, res) -> res.text("plugin ok, routes registered"));
 
         try {
-            server.start();
-            LOG.info("Recaf MCP plugin listening on http://" + host + ":" + port);
+            server.start(PORT_SPAN, RESERVED_PORTS);
+            LOG.info("Recaf MCP plugin listening on http://" + host + ":" + server.getPort());
         } catch (Exception e) {
             LOG.log(Level.SEVERE, "Failed to start Recaf MCP HTTP server", e);
         }
@@ -103,10 +108,6 @@ public class RecafMcpPlugin implements Plugin {
         if (server != null) {
             server.stop();
             server = null;
-        }
-        if (uiState != null) {
-            uiState.uninstall(workspaceManager);
-            uiState = null;
         }
     }
 }

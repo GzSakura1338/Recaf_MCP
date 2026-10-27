@@ -6,7 +6,44 @@ Operations over the Recaf 4.0.0 Workspace: the active primary resource
 classpath), and the currently focused class/selection in the UI.
 """
 
+import os
+
+from src.server import windows
 from src.server.config import get_from_recaf, post_to_recaf
+
+
+async def open_recaf_window(jar_path: str = "", wait_seconds: int = 60) -> dict:
+    """
+    Start another Recaf process and wait until its plugin answers.
+
+    The new window gets the next window number. If `jar_path` is given it is
+    opened in the new window as soon as it is up. The default window chosen
+    with switch_recaf_window is left unchanged.
+
+    MCP Tool: open_recaf_window
+    """
+    if jar_path and not os.path.exists(jar_path):
+        return {"error": f"path not found: {jar_path}"}
+
+    try:
+        window = await windows.launch(max(1, min(wait_seconds, 300)))
+    except windows.WindowError as e:
+        return e.payload()
+
+    result = {"opened": windows.describe(window)}
+    if jar_path:
+        token = windows.requested_window.set(str(window["window"]))
+        try:
+            result["open_workspace"] = await post_to_recaf("workspace/open", {"path": jar_path})
+        finally:
+            windows.requested_window.reset(token)
+        windows.invalidate()
+        try:
+            result["opened"] = windows.describe(await windows.resolve(str(window["window"])))
+        except windows.WindowError:
+            pass
+    result["label"] = result["opened"]["label"]
+    return result
 
 
 async def get_workspace_info() -> dict:

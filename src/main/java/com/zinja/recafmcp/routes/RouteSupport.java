@@ -5,12 +5,16 @@ import software.coley.recaf.info.JvmClassInfo;
 import software.coley.recaf.info.member.FieldMember;
 import software.coley.recaf.info.member.LocalVariable;
 import software.coley.recaf.info.member.MethodMember;
+import software.coley.recaf.info.properties.builtin.InputFilePathProperty;
 import software.coley.recaf.path.ClassPathNode;
 import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.workspace.model.Workspace;
 import software.coley.recaf.workspace.model.bundle.JvmClassBundle;
+import software.coley.recaf.workspace.model.resource.WorkspaceDirectoryResource;
+import software.coley.recaf.workspace.model.resource.WorkspaceFileResource;
 import software.coley.recaf.workspace.model.resource.WorkspaceResource;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -85,6 +89,26 @@ final class RouteSupport {
         return Stream.concat(
                 resource.jvmClassBundleStreamRecursive(),
                 resource.versionedJvmClassBundleStreamRecursive().map(bundle -> (JvmClassBundle) bundle));
+    }
+
+    static Path resourcePath(WorkspaceResource resource) {
+        if (resource == null) return null;
+        Path path = resource.getPropertyValueOrNull(InputFilePathProperty.KEY);
+        if (path == null && resource instanceof WorkspaceFileResource fileResource)
+            path = InputFilePathProperty.get(fileResource.getFileInfo());
+        if (path == null && resource instanceof WorkspaceDirectoryResource directoryResource)
+            path = directoryResource.getDirectoryPath();
+        return path;
+    }
+
+    static String resourceName(WorkspaceResource resource) {
+        Path path = resourcePath(resource);
+        if (path != null) {
+            Path fileName = path.getFileName();
+            return fileName != null ? fileName.toString() : path.toString();
+        }
+        if (resource instanceof WorkspaceFileResource fileResource) return fileResource.getFileInfo().getName();
+        return null;
     }
 
     static String required(String value, String name, com.zinja.recafmcp.http.Response res) throws Exception {
