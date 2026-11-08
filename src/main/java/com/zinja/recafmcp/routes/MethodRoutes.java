@@ -21,7 +21,6 @@ import software.coley.recaf.workspace.model.Workspace;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 public class MethodRoutes {
     private final WorkspaceManager wm;
@@ -37,7 +36,9 @@ public class MethodRoutes {
             Lookup lookup = resolve(req.query("class_name"), req.query("method_name"), req.query("descriptor"), res);
             if (lookup == null) return;
 
-            DecompileResult result = dm.decompile(wm.getCurrent(), lookup.cls).get(60, TimeUnit.SECONDS);
+            Workspace ws = wm.getCurrent();
+            DecompileResult result = DecompileGuard.run(lookup.cls.getName(), () -> dm.decompile(ws, lookup.cls), res);
+            if (result == null) return;
             if (result.getException() != null) {
                 res.status(500).json(JsonResponses.error(result.getException().toString()));
                 return;

@@ -13,9 +13,6 @@ import software.coley.recaf.services.decompile.JvmDecompiler;
 import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.workspace.model.Workspace;
 
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-
 public class DecompileRoutes {
     private final WorkspaceManager wm;
     private final DecompilerManager dm;
@@ -84,37 +81,31 @@ public class DecompileRoutes {
             return;
         }
 
+        JvmDecompiler decompiler = null;
+        if (decompilerName != null && !decompilerName.isBlank()) {
+            decompiler = findDecompiler(decompilerName);
+            if (decompiler == null) {
+                res.status(404).json(JsonResponses.error("unknown decompiler: " + decompilerName));
+                return;
+            }
+        }
+
         JvmClassInfo cls = (JvmClassInfo) node.getValue();
-        CompletableFuture<DecompileResult> future = decompilerName == null || decompilerName.isBlank()
-                ? dm.decompile(ws, cls)
-                : decompileWith(ws, cls, decompilerName, res);
-        if (future == null) {
+        JvmDecompiler chosen = decompiler;
+        DecompileResult result = DecompileGuard.run(cls.getName(),
+                () -> chosen == null ? dm.decompile(ws, cls) : dm.decompile(chosen, ws, cls), res);
+        if (result == null) {
             return;
         }
 
-        DecompileResult result = future.get(60, TimeUnit.SECONDS);
         JsonObject out = new JsonObject();
         out.addProperty("class_name", className);
-        out.addProperty("decompiler", decompilerName == null || decompilerName.isBlank()
-                ? dm.getTargetJvmDecompiler().getName()
-                : findDecompiler(decompilerName).getName());
+        out.addProperty("decompiler", decompiler == null ? dm.getTargetJvmDecompiler().getName() : decompiler.getName());
         out.addProperty("text", result.getText());
         if (result.getException() != null) {
             out.addProperty("warning", result.getException().toString());
         }
         res.json(out);
-    }
-
-    private CompletableFuture<DecompileResult> decompileWith(Workspace ws,
-                                                             JvmClassInfo cls,
-                                                             String decompilerName,
-                                                             com.zinja.recafmcp.http.Response res) throws Exception {
-        JvmDecompiler decompiler = findDecompiler(decompilerName);
-        if (decompiler == null) {
-            res.status(404).json(JsonResponses.error("unknown decompiler: " + decompilerName));
-            return null;
-        }
-        return dm.decompile(decompiler, ws, cls);
     }
 
     private JvmDecompiler findDecompiler(String name) {
