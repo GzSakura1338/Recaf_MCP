@@ -2,7 +2,9 @@
 
 ## Before You Push
 
-1. Put your local `recaf.jar` in `libs/recaf.jar` only for building.
+1. `libs/recaf.jar` is tracked (pinned Recaf 4 release, used only for building).
+   If you build against another release, replace it and commit the new hash in the
+   commit message, or point `RECAF_JAR` at a local jar.
 2. Run `.\gradlew.bat jar` (Windows) or `./gradlew jar` (Linux/macOS).
 3. Start Recaf and confirm the plugin logs `http://127.0.0.1:8750`.
 4. Run `pip install -r mcp-server/requirements.txt`.
@@ -19,6 +21,9 @@
 - root `requirements.txt`
 - `scripts/linux/` (headless launchers, installer, self test)
 - `contrib/systemd/`, `docs/linux-headless.md`
+- `libs/recaf.jar` — the pinned Recaf 4 release the plugin compiles against, so a
+  clone builds without hunting for a jar. Swap it for another release/architecture
+  when needed (`RECAF_JAR` still overrides it for a normal build).
 - `README.md`
 - `LICENSE`
 - `.gitignore`
@@ -26,7 +31,6 @@
 
 ## What Should Not Be In GitHub
 
-- `libs/recaf.jar`
 - `build/`
 - `.gradle/`
 - `.idea/`

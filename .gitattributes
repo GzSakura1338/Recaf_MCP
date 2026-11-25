@@ -1,0 +1,2 @@
+# Vendored binaries: never normalize line endings, never show them in diffs
+libs/recaf.jar binary
