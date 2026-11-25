@@ -236,6 +236,16 @@ CI 里只想验证链路时：
 ./scripts/linux/smoke_test.sh --with-mcp
 ```
 
+全量工具矩阵（起一个 stdio MCP 服务 + 无头 Recaf，逐个调用全部 70 个工具，打印 PASS/FAIL）：
+
+```bash
+.venv/bin/python scripts/mcp_tool_matrix.py --jar /path/to/target.jar
+# 退出码 0 = 全部符合预期；失败项会打印工具名、耗时和服务端错误
+```
+
+它先只读地检查目标 jar，再把几个很小的 scratch 类写进一个新工作区，用它们测试字节码编辑、
+重命名、导出等有副作用的工具，最后清理并重新打开目标 jar。
+
 只测"启动参数怎么拼"的单元测试（不需要 Recaf、不需要显示）：
 
 ```bash

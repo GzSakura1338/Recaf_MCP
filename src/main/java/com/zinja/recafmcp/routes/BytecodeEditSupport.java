@@ -9,6 +9,7 @@ import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.*;
 import software.coley.recaf.info.JvmClassInfo;
+import software.coley.recaf.info.builder.JvmClassInfoBuilder;
 import software.coley.recaf.workspace.model.Workspace;
 import software.coley.recaf.workspace.model.bundle.JvmClassBundle;
 
@@ -610,8 +611,7 @@ final class BytecodeEditSupport {
                 .findFirst().orElse(null);
         if (bundle == null) return 0;
 
-        JvmClassInfo original = (JvmClassInfo) ws.findJvmClass(internal).getValue();
-        JvmClassInfo updated = original.toJvmClassBuilder().withBytecode(bytes).build();
+        JvmClassInfo updated = new JvmClassInfoBuilder(bytes).build();
         bundle.put(updated);
         return 1;
     }
@@ -739,7 +739,11 @@ final class BytecodeEditSupport {
             }
         };
         classNode.accept(writer);
-        JvmClassInfo updated = original.toJvmClassBuilder().withBytecode(writer.toByteArray()).build();
+        // Parse the new bytes instead of copying the original info: a builder that only
+        // swaps the bytecode keeps the old members/access cached, so every read route
+        // (class-info, methods-of-class, resolveMethod after add_method) kept serving
+        // the pre-edit class. Only the bytes used for export were fresh.
+        JvmClassInfo updated = new JvmClassInfoBuilder(writer.toByteArray()).build();
         bundle.put(updated);
     }
 

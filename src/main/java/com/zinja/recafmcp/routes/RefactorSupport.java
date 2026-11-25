@@ -6,6 +6,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.LocalVariableNode;
 import org.objectweb.asm.tree.MethodNode;
 import software.coley.recaf.info.JvmClassInfo;
+import software.coley.recaf.info.builder.JvmClassInfoBuilder;
 import software.coley.recaf.services.mapping.format.MappingFileFormat;
 import software.coley.recaf.services.mapping.format.MappingFormatManager;
 import software.coley.recaf.workspace.model.Workspace;
@@ -38,7 +39,7 @@ final class RefactorSupport {
 
         ClassWriter writer = new ClassWriter(0);
         classNode.accept(writer);
-        JvmClassInfo updated = target.classInfo().toJvmClassBuilder().withBytecode(writer.toByteArray()).build();
+        JvmClassInfo updated = new JvmClassInfoBuilder(writer.toByteArray()).build();
         bundle.put(updated);
         return renamed;
     }
