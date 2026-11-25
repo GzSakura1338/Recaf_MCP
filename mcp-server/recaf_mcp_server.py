@@ -23,6 +23,11 @@ starts new processes headless automatically (no DISPLAY => headless), or force i
         --recaf-jar libs/recaf.jar --recaf-plugins-dir build/libs
 
 See docs/linux-headless.md.
+
+An MCP host can also let this server start Recaf itself: with --auto-start-recaf
+(or RECAF_AUTO_START=1) the first tool call that finds no window launches one
+("--headless --idle" when there is no display) and then runs. That is how DSH
+brings the whole chain up from a single stdio MCP entry.
 """
 
 import argparse
@@ -800,6 +805,18 @@ async def save_workspace(output_path: str) -> dict:
 # Entrypoint
 # =============================================================================
 
+def _env_bool(name: str):
+    """Read a boolean-ish environment variable, or None when unset/blank."""
+    value = os.environ.get(name, "").strip().lower()
+    if not value:
+        return None
+    if value in {"1", "true", "yes", "on", "auto"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
 def _default_plugin_dir() -> str:
     """Use build/libs when it already holds the plugin jar, so a dev checkout works out of the box."""
     root = Path(__file__).resolve().parents[1]
@@ -904,7 +921,35 @@ def main():
         default=None,
         type=str,
     )
+    parser.add_argument(
+        "--auto-start-recaf",
+        help="When a tool call finds no Recaf window at all, start one (headless where there is "
+             "no display) and continue. Makes an MCP host such as DSH able to bring the whole "
+             "chain up by itself. Default: $RECAF_AUTO_START, else off.",
+        dest="auto_start",
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--no-auto-start-recaf",
+        help="Never start Recaf automatically, even when $RECAF_AUTO_START asks for it.",
+        dest="auto_start",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--auto-start-wait",
+        help="Seconds to wait for the plugin of an auto-started Recaf (default: $RECAF_AUTO_START_WAIT or 90).",
+        default=None,
+        type=int,
+    )
     args = parser.parse_args()
+
+    auto_start = args.auto_start
+    if auto_start is None:
+        auto_start = _env_bool("RECAF_AUTO_START") or False
+    auto_wait = args.auto_start_wait
+    if auto_wait is None:
+        auto_wait = int(os.environ.get("RECAF_AUTO_START_WAIT") or 90)
 
     config.set_recaf_host(args.recaf_host)
     config.set_recaf_port(args.recaf_port)
@@ -919,6 +964,8 @@ def main():
         java_args=shlex.split(args.java_args if args.java_args is not None
                               else os.environ.get("RECAF_JAVA_ARGS", "")),
         log=args.recaf_launch_log or os.environ.get("RECAF_LAUNCH_LOG") or None,
+        auto=auto_start,
+        auto_wait=auto_wait,
     )
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
@@ -940,6 +987,9 @@ def main():
             args.recaf_port,
         )
 
+    if auto_start:
+        logger.info("Auto-start is on: a tool call with no Recaf window will start one "
+                    "(headless when there is no display).")
     logger.info("Looking for Recaf windows...")
     result = config.health_ping()
     logger.info("Health check result: %s", result)

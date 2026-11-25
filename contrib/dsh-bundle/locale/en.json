@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Recaf MCP",
+    "description": "Gives the agent the recaf-mcp tool set (classes, methods, search, cross-references, renames, export, bytecode editing) over stdio. DSH starts the MCP server, and the server starts a headless Recaf when no window is running, so no X server and no manual startup are needed. Tools appear as mcp__recaf__<tool>; the first call takes a few seconds while Recaf boots, and the Recaf process stays up for later sessions.",
+    "detail": "docs/DETAIL.md"
+  }
+}

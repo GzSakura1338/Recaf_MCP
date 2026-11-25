@@ -171,6 +171,11 @@ In headless mode the UI-bound tools (`fetch_current_class`, `get_selected_text`)
 search, xrefs, renames, export, bytecode editing) works normally. `list_recaf_windows` reports a
 `headless` flag per window.
 
+Instead of starting processes by hand, run the MCP server with `--auto-start-recaf`
+(or `RECAF_AUTO_START=1`): the first tool call that needs a window starts headless Recaf itself.
+DSH users can install the ready-made configuration-only bundle in
+[contrib/dsh-bundle/](contrib/dsh-bundle/); its tools are named `mcp__recaf__get_class_source` etc.
+
 End-to-end self test:
 
 ```bash
@@ -244,6 +249,7 @@ Windows that still run an older plugin without `/instance` are found too, but ca
 ├── mcp-server/           # Python MCP server
 ├── scripts/linux/        # Linux headless launchers, installer, self test
 ├── contrib/systemd/      # systemd user unit templates
+├── contrib/dsh-bundle/   # DSH configuration-only bundle (stdio, auto-start)
 ├── docs/linux-headless.md# headless guide
 ├── libs/                 # recaf.jar goes here
 ├── recaf_mcp_server.py   # MCP server entry point

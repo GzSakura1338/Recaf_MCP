@@ -44,6 +44,20 @@ data_dir: Optional[str] = None
 java_binary: Optional[str] = None
 extra_java_args: List[str] = []
 launch_log: Optional[str] = None
+# Start a headless Recaf automatically when a tool call finds no window at all.
+# This is what lets an MCP host (DSH, Claude Code, ...) bring the whole chain up
+# on its own: the host spawns this server, the server spawns Recaf.
+auto_start: bool = False
+auto_start_wait: int = 90
+AUTO_START_RETRY_SECONDS = 60.0
+
+_auto_start_lock: Optional[asyncio.Lock] = None
+_auto_start_failed_at = 0.0
+
+
+def _log(message: str) -> None:
+    """Diagnostics go to stderr: stdout carries the stdio MCP protocol."""
+    print(f"[recaf-mcp] {message}", file=sys.stderr, flush=True)
 
 requested_window = contextvars.ContextVar("recaf_window", default="")
 
@@ -84,9 +98,11 @@ def set_launch_jar(path: Optional[str]) -> None:
 def configure_launch(recaf_jar: Optional[str] = None, headless_mode: Optional[bool] = None,
                      plugins: Optional[str] = None, data: Optional[str] = None,
                      java: Optional[str] = None, java_args: Optional[List[str]] = None,
-                     log: Optional[str] = None) -> None:
-    """Configure how open_recaf_window starts a new Recaf process."""
+                     log: Optional[str] = None, auto: Optional[bool] = None,
+                     auto_wait: Optional[int] = None) -> None:
+    """Configure how open_recaf_window (and auto-start) launches a Recaf process."""
     global launch_jar, headless, plugin_dir, data_dir, java_binary, extra_java_args, launch_log
+    global auto_start, auto_start_wait
     if recaf_jar is not None:
         launch_jar = recaf_jar
     if headless_mode is not None:
@@ -101,6 +117,10 @@ def configure_launch(recaf_jar: Optional[str] = None, headless_mode: Optional[bo
         extra_java_args = list(java_args)
     if log is not None:
         launch_log = log
+    if auto is not None:
+        auto_start = auto
+    if auto_wait is not None:
+        auto_start_wait = max(10, int(auto_wait))
 
 
 def _headless_requested() -> bool:
@@ -250,6 +270,19 @@ def _pick_default(found: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 async def resolve(spec: str = "") -> Dict[str, Any]:
     spec = (spec or "").strip()
+    try:
+        return await _resolve_once(spec)
+    except WindowError as e:
+        # Only "nothing is running" is worth starting Recaf for. Several windows
+        # or a stale default are answers the caller has to resolve itself.
+        if not auto_start or spec or e.found:
+            raise
+        if not await _ensure_window():
+            raise
+        return await _resolve_once(spec)
+
+
+async def _resolve_once(spec: str) -> Dict[str, Any]:
     for refresh in (False, True):
         found = await _windows(refresh)
         try:
@@ -260,6 +293,37 @@ async def resolve(spec: str = "") -> Dict[str, Any]:
     raise AssertionError("unreachable")
 
 
+async def _ensure_window() -> bool:
+    """Start one Recaf (headless when the platform has no display) and wait for its plugin."""
+    global _auto_start_lock, _auto_start_failed_at
+    if time.monotonic() - _auto_start_failed_at < AUTO_START_RETRY_SECONDS:
+        return False
+    if not _headless_available_for_autostart():
+        _log("no Recaf window found and no display to start one; start Recaf first")
+        return False
+    if _auto_start_lock is None:
+        _auto_start_lock = asyncio.Lock()
+    async with _auto_start_lock:
+        if await discover():
+            return True
+        _log("no Recaf window found; starting one (auto-start)")
+        try:
+            window = await launch(auto_start_wait)
+        except WindowError as e:
+            _auto_start_failed_at = time.monotonic()
+            _log(f"auto-start failed: {e}")
+            return False
+        _log(f"started {window['label']} (pid {window.get('pid')}, port {window['port']}"
+             + (", headless)" if window.get("headless") else ")"))
+        invalidate()
+        return True
+
+
+def _headless_available_for_autostart() -> bool:
+    """A GUI Recaf cannot start without a display; headless can."""
+    return _headless_requested() or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 async def resolve_base() -> str:
     return (await resolve(requested_window.get()))["base"]
 
@@ -267,10 +331,16 @@ async def resolve_base() -> str:
 async def list_windows() -> Dict[str, Any]:
     found = await _windows(refresh=True)
     current = _find(found, _active_window) if _active_window is not None else None
-    return {
+    result: Dict[str, Any] = {
         "windows": [describe(w, _active_window) for w in found],
         "active": current["label"] if current else None,
     }
+    if not found and auto_start:
+        # Listing should not spawn a JVM, but the model needs to know it can just call.
+        result["auto_start"] = True
+        result["hint"] = ("no Recaf window is running yet; the next tool call starts one "
+                          "(headless when there is no display) and then runs")
+    return result
 
 
 async def switch(spec: str) -> Dict[str, Any]:

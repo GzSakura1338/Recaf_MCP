@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Recaf MCP 连接",
+    "description": "用 stdio 把 recaf-mcp 工具集（类、方法、搜索、交叉引用、重命名、导出、字节码编辑）提供给智能体。DSH 负责拉起 MCP 服务，服务在没有 Recaf 窗口时自动拉起无头 Recaf，因此不需要 X server，也不用手动启动。工具名形如 mcp__recaf__<tool>；首次调用会等 Recaf 启动几秒，之后 Recaf 进程会保留给后续会话使用。",
+    "detail": "docs/DETAIL.zh.md"
+  }
+}

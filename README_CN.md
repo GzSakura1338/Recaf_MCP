@@ -188,6 +188,10 @@ pid 在 `.run/`。systemd 用户单元模板见 `contrib/systemd/`。
 `ui_available: false` 和说明，而不是报错；其余工具（类、方法、搜索、xref、重命名、
 导出、字节码编辑）全部可用。`list_recaf_windows` 列出的每个窗口都带 `headless` 字段。
 
+不想手动起进程也行：MCP 服务加 `--auto-start-recaf`（或 `RECAF_AUTO_START=1`），
+第一次需要窗口的工具调用会自动拉起无头 Recaf。DSH 用户可以直接装仓库里的配置型
+bundle：[contrib/dsh-bundle/](contrib/dsh-bundle/)，工具名形如 `mcp__recaf__get_class_source`。
+
 端到端自检：
 
 ```bash
@@ -260,6 +264,7 @@ Invoke-WebRequest http://127.0.0.1:8750/health
 ├── mcp-server/           # Python MCP 服务端
 ├── scripts/linux/        # Linux 无头启动 / 安装 / 自检脚本
 ├── contrib/systemd/      # systemd 用户单元模板
+├── contrib/dsh-bundle/   # DSH 配置型 bundle（stdio，自动拉起）
 ├── docs/linux-headless.md# 无头运行完整说明
 ├── libs/                 # recaf.jar 存放处
 ├── recaf_mcp_server.py   # MCP 服务器入口

@@ -165,7 +165,43 @@ MCP 客户端配置：
 
 ---
 
-## 5. systemd（用户级）
+## 5. 让宿主主动拉起服务（auto-start / DSH）
+
+前面两步是手动起进程。也可以反过来：**MCP 宿主（DSH、Claude Code、IDE 等）用 stdio
+拉起 MCP 服务，服务再自己拉起无头 Recaf**，用户只需要一条 MCP 配置。
+
+```bash
+# --auto-start-recaf：任何一次工具调用发现"一个 Recaf 窗口都没有"时，
+# 自动按当前配置（默认无头）拉起 Recaf，等插件就绪后再执行这次调用。
+.venv/bin/python recaf_mcp_server.py   --headless --auto-start-recaf   --recaf-jar libs/recaf.jar --recaf-plugins-dir build/libs --java /usr/local/bin/java
+```
+
+行为细节：
+
+- 只在**完全没有窗口**时触发；有多个窗口却没指定 `window` 属于调用方要解决的问题，不会去开新进程。
+- 失败后 60 秒内不重试，避免每个工具调用都去点一次 JVM。
+- 拉起的 Recaf 是独立进程（`start_new_session`），MCP 服务退出后仍在运行，下次会话直接复用。
+- `list_recaf_windows` 在空列表时会返回 `auto_start: true` 和 `hint`，告诉模型"下一次调用会自动起一个"。
+- 环境变量等价物：`RECAF_AUTO_START=1`、`RECAF_AUTO_START_WAIT=90`。
+
+### DSH
+
+本仓库带一个现成的配置型 bundle：[`contrib/dsh-bundle/`](../contrib/dsh-bundle/)，它往 DSH
+里插入一条 stdio 的 `@deepseek-ai/dsh-mcp-client` 记录，路径指向本 checkout。安装：
+
+```bash
+dsh plugin install "/path/to/Recaf_MCP/contrib/dsh-bundle"
+# 或者在 Web UI：Plugins → Add plugin → 选择这个目录
+```
+
+装好后 DSH 里的工具名形如 `mcp__recaf__get_class_source`、`mcp__recaf__search_strings`、
+`mcp__recaf__rename_class`。第一次调用会多等几秒（Recaf 正在启动 + 导入 jar），
+`toolCallTimeoutMs: 180000` 覆盖这个场景。
+
+> 注意：`cordis.patch.yml` 里是本机的绝对路径（`.venv/bin/python`、`recaf_mcp_server.py`、
+> `libs/recaf.jar`、`build/libs`、`/usr/local/bin/java`），换机器要先改。
+
+## 6. systemd（用户级）
 
 ```bash
 cp contrib/systemd/recaf-mcp-headless.service ~/.config/systemd/user/
@@ -180,7 +216,7 @@ journalctl --user -u recaf-mcp-headless -f
 
 ---
 
-## 6. 容器 / CI
+## 7. 容器 / CI
 
 ```dockerfile
 FROM eclipse-temurin:25-jdk
@@ -212,7 +248,7 @@ CI 里只想验证链路时：
 
 ---
 
-## 7. 端口与多实例
+## 8. 端口与多实例
 
 - 每个 Recaf 进程从 `8750` 起绑定第一个空闲端口，跳过 `8751`（MCP 服务），最多到 `8769`。
 - 想并排跑多个无头 Recaf：给每个实例不同的 `--port`（期望端口）和 `--data-dir`，
@@ -220,7 +256,7 @@ CI 里只想验证链路时：
 
 ---
 
-## 8. 排错
+## 9. 排错
 
 | 现象 | 原因 / 处理 |
 |---|---|

@@ -20,7 +20,7 @@
 - root `recaf_mcp_server.py`
 - root `requirements.txt`
 - `scripts/linux/` (headless launchers, installer, self test)
-- `contrib/systemd/`, `docs/linux-headless.md`
+- `contrib/systemd/`, `contrib/dsh-bundle/`, `docs/linux-headless.md`
 - `libs/recaf.jar` — the pinned Recaf 4 release the plugin compiles against, so a
   clone builds without hunting for a jar. Swap it for another release/architecture
   when needed (`RECAF_JAR` still overrides it for a normal build).

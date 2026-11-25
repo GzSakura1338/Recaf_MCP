@@ -1,0 +1,30 @@
+# Recaf MCP over stdio: DSH spawns the server, the server starts headless Recaf.
+#
+# The paths below point at this checkout; change them to your own clone, and
+# keep the `--java` path in sync with the JDK 25 you build Recaf with.
+- insert:
+    - id: recaf-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: recaf
+        transport: stdio
+        command: /data/dsh/home/Recaf MCP/.agents/worktrees/linux-headless/.venv/bin/python
+        args:
+          - /data/dsh/home/Recaf MCP/.agents/worktrees/linux-headless/recaf_mcp_server.py
+          - --headless
+          - --auto-start-recaf
+          - --recaf-jar
+          - /data/dsh/home/Recaf MCP/.agents/worktrees/linux-headless/libs/recaf.jar
+          - --recaf-plugins-dir
+          - /data/dsh/home/Recaf MCP/.agents/worktrees/linux-headless/build/libs
+          - --java
+          - /usr/local/bin/java
+        cwd: /data/dsh/home/Recaf MCP/.agents/worktrees/linux-headless
+        startupTimeoutMs: 60000
+        toolCallTimeoutMs: 180000
+        failOnStartupError: false
+        # A crashed Recaf is restarted by the next tool call (auto-start), so the
+        # reconnect budget only has to cover the MCP server itself.
+        reconnect:
+          enabled: true
+          maxAttempts: 3
