@@ -2,220 +2,235 @@
 
 # Recaf MCP
 
-> *「把 Recaf 变成 LLM 可调用的 API」*
+> *把 Recaf 4 变成 LLM 可以调用的 API*
 
 [![Java](https://img.shields.io/badge/Java-25-ED8106)](https://adoptium.net/)
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB)](https://www.python.org/)
 [![Recaf](https://img.shields.io/badge/Recaf-4.x-2D9CDB)](https://www.coley.software/recaf4/)
-[![MCP](https://img.shields.io/badge/MCP-HTTP-8B5CF6)](https://modelcontextprotocol.io/)
+[![MCP](https://img.shields.io/badge/MCP-stdio%20%7C%20HTTP-8B5CF6)](https://modelcontextprotocol.io/)
+[![License](https://img.shields.io/badge/License-Apache--2.0-3DA639)](LICENSE)
 [![QQ Group](https://img.shields.io/badge/QQ%20Group-Join-0099FF?logo=tencent-qq&logoColor=white)](https://qm.qq.com/q/KWcs2UBtYK)
 
-<br>
-
-[English](README.md)
-
-<br>
-
-**Recaf 4 MCP 桥接工具 — 通过 MCP 协议远程操作 Recaf 工作区进行 JVM 字节码分析与修改。**
-
-<br>
-
-Java 插件运行在 Recaf 内部，暴露本地 HTTP API；Python MCP 服务器将 API 转为 MCP 工具供 LLM 客户端调用。
-
-<br>
-
-[工具列表](#工具列表) · [快速开始](#快速开始) · [字节码编辑](#字节码编辑) · [安装插件](#安装插件)
+[English](README.md) · [无头运行指南](docs/linux-headless.md) · [发布检查清单](PUBLISHING.md)
 
 </div>
 
 ---
 
-## 工具列表
+## 这是什么
 
-下面所有工具都带一个可选的 `window` 参数，见[多 Recaf 窗口](#多-recaf-窗口)。
+**Recaf MCP** 把 [Recaf 4](https://github.com/Col-E/Recaf) 变成一个 **70 个工具的 MCP 服务**：
+模型可以列出类、反编译方法、搜索字符串与指令、查交叉引用、批量重命名、导出 jar，
+也可以直接读写字节码（指令级增删改、JASM 汇编、访问标志、方法/字段增删、try-catch、替换类字节）。
 
-### Recaf 窗口
-`list_recaf_windows` `switch_recaf_window` `open_recaf_window`
+```text
+MCP 客户端 (DSH / Claude Code / IDE)
+        │  stdio（宿主拉起进程） 或 HTTP streamable
+        ▼
+Python MCP 服务  ──HTTP──▶  Recaf 插件（运行在 Recaf 进程内）
+  127.0.0.1:8751              127.0.0.1:8750
+        │                          │
+        └── 自动拉起 ──────────────▶ recaf --headless --idle
+```
 
-### 工作区
-`get_workspace_info` `open_workspace` `close_workspace` `add_supporting_resource` `list_supporting_resources` `fetch_current_class` `get_selected_text`
+- **插件**用纯 JDK 的 HTTP 服务暴露 Recaf 内部 API（工作区、搜索、反编译、ASM 编辑）。
+- **MCP 服务**把 HTTP API 映射成 MCP 工具，并负责发现/编号/切换多个 Recaf 窗口。
+- **Recaf 4 自带 `--headless --idle` 无头模式**，所以 Linux 服务器、容器、CI 不需要 X server，
+  也不需要 Xvfb —— 这是本项目相对图形界面的关键区别。
 
-### 类
-`get_all_classes` `get_class_info` `get_class_source` `get_bytecode_of_class` `get_methods_of_class` `get_fields_of_class` `get_inner_classes` `get_annotations_of_class` `get_raw_class_bytes`
+## 特性
 
-### 方法
-`get_method_by_name` `get_method_bytecode` `get_method_info`
-
-### 搜索
-`search_classes_by_name` `search_members_by_name` `search_strings` `search_numbers` `search_instructions`
-
-### 交叉引用
-`get_xrefs_to_class` `get_xrefs_to_method` `get_xrefs_to_field` `get_callers_of_method` `get_callees_of_method` `get_overrides_of_method`
-
-### 重命名
-`rename_class` `rename_method` `rename_field` `rename_package` `rename_local_variable` `apply_mappings`
-
-### 反编译器
-`list_decompilers` `set_active_decompiler` `decompile_class_with`
-
-### 继承
-`get_superclasses` `get_interfaces` `get_direct_subclasses` `get_all_subclasses` `get_implementors`
-
-### 资源与导出
-`get_all_file_names` `get_file_content` `get_manifest` `get_strings_from_resources` `export_workspace` `get_modified_classes` `revert_class`
-
----
-
-## 字节码编辑
-
-支持完整的字节码读写：指令级修改、JASM 文本汇编、访问标志编辑、方法/字段增删、try-catch 块编辑、类字节替换、工作区导出。
-
-### 指令操作
-`list_method_instructions` `get_method_bytecode` `replace_instruction` `insert_instruction` `remove_instruction`
-
-### 方法体
-`assemble_method` `replace_method_body`
-
-### 访问标志
-`edit_class_access` `edit_method_access` `edit_field_access`
-
-### 方法/字段 CRUD
-`add_method` `remove_method` `add_field` `remove_field`
-
-### 其他
-`set_try_catch_blocks` `replace_class_bytes` `save_workspace`
-
----
+| 特性 | 说明 |
+|---|---|
+| 70 个工具 | 工作区、类、方法、搜索、xref、重命名、反编译、继承、资源、导出、字节码编辑 |
+| 原生无头 | `recaf --headless --idle`，无需 DISPLAY；无头下 UI 相关工具优雅降级 |
+| 自动拉起 | MCP 服务发现没有窗口时自己启动无头 Recaf（`--auto-start-recaf`） |
+| 多窗口 | 一个服务管理多个 Recaf 进程，`<编号>:<jar 名>` 定位，不会改错 jar |
+| 三种接入 | stdio（宿主拉起）/ streamable HTTP（常驻服务）/ 现成的 DSH bundle |
+| 双平台脚本 | Windows PowerShell 与 Linux bash 对等：启动、停止、状态、安装、自检 |
+| 测试齐全 | 70 工具矩阵（110 次调用）、Python 单测、无头冒烟测试、自动拉起测试 |
 
 ## 环境要求
 
-- Java 25
-- Python 3.10+
-- `recaf.jar`
+- **JDK 25**（Recaf 4 与插件编译目标）
+- **Python 3.10+**（`fastmcp>=3.0.2`、`httpx`、`requests`）
+- **`recaf.jar`**：仓库已内置 `libs/recaf.jar`（Recaf 4.0.0-alpha，linux-aarch 构建）。
+  其它平台从 [Recaf Releases](https://github.com/Col-E/Recaf/releases) 下载对应 jar 覆盖即可，
+  或用 `RECAF_JAR` 指向别处的 jar。
 
-Linux 上不需要 X server / Xvfb：Recaf 自带 `--headless --idle` 无头模式，插件照常提供 HTTP API。
-详见 [docs/linux-headless.md](docs/linux-headless.md)。
+| 场景 | 需要图形界面 | 推荐入口 |
+|---|---|---|
+| Linux 无头（服务器 / 容器 / CI） | 否 | `scripts/linux/install.sh` |
+| Windows / Linux 桌面 GUI | 是 | `gradlew jar` + Recaf 插件目录 |
+| 由 MCP 宿主自己拉起 | 否 | stdio 配置 / `contrib/dsh-bundle` |
 
 ## 快速开始
 
-### 1. 提供 recaf.jar
+### A. Linux 无头（最快）
 
-构建按以下顺序查找 Recaf：
+```bash
+# 1) 编译插件、装进 ~/.config/Recaf/plugins、建 .venv 装依赖
+./scripts/linux/install.sh
 
-1. 环境变量 `RECAF_JAR`
-2. `libs/recaf.jar`
-3. `../recaf/recaf.jar`
+# 2) 启动无头 Recaf（可在启动时打开目标 jar）
+./scripts/linux/start_recaf_headless.sh start --input /path/to/target.jar
 
-```powershell
-$env:RECAF_JAR="D:\deobf\recaf\recaf.jar"
-```
-
-### 2. 构建插件
-
-```powershell
-.\gradlew.bat jar     # Windows
+# 3) 启动 MCP 服务
+./scripts/linux/start_mcp_http.sh start
 ```
 
 ```bash
-./gradlew jar          # Linux / macOS
+./scripts/linux/start_recaf_headless.sh status   # 状态
+./scripts/linux/start_mcp_http.sh status
+./scripts/linux/start_recaf_headless.sh stop     # 停止
 ```
 
-输出：`build/libs/recaf-mcp-plugin-0.1.0.jar`
+日志在 `logs/`，pid 在 `.run/`。完整参数、systemd、Docker、排错见
+**[docs/linux-headless.md](docs/linux-headless.md)**。
 
-### 3. 安装插件
-
-将 jar 复制到 Recaf 插件缓存目录：
-
-- Windows：`%APPDATA%/Recaf/plugins/`
-- Linux：`${XDG_CONFIG_HOME:-~/.config}/Recaf/plugins/`
-- 或者用 `-r <目录>` / `RECAF_EXTRA_PLUGINS` 指向 jar 所在目录
-
-然后启动 Recaf。Linux 上这套流程可以一条命令搞定：`./scripts/linux/install.sh`。
-
-加载成功后日志显示：
-
-```
-Recaf MCP plugin listening on http://127.0.0.1:8750
-```
-
-### 4. 安装 Python 依赖
+### B. Windows / 桌面 GUI
 
 ```powershell
+# 1) 构建插件（用仓库自带的 libs/recaf.jar，或用 RECAF_JAR 指定）
+.\gradlew.bat jar
+# 2) 复制到 %APPDATA%\Recaf\plugins\ 后启动 Recaf
+# 3) 安装 Python 依赖并启动 MCP 服务
 pip install -r requirements.txt
-```
-
-```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # Linux
-```
-
-### 5. 启动 MCP 服务器
-
-```powershell
-python recaf_mcp_server.py --http --port 8751
-```
-
-或使用启动脚本：
-
-```powershell
 .\start_recaf_mcp_http.ps1
 ```
 
-```bash
-./scripts/linux/start_mcp_http.sh start
+启动成功时 Recaf 日志里会出现：
+
+```text
+Recaf MCP plugin listening on http://127.0.0.1:8750
 ```
 
----
+### C. 让 MCP 宿主自己拉起（stdio / DSH）
 
-## Linux 与无头运行
+宿主负责启动 MCP 服务，服务负责启动 Recaf，一条配置即可：
 
-Linux（服务器 / 容器 / CI / 无桌面的 ssh 会话）用三个脚本：
-
-```bash
-# 1. 一次性安装：编译插件 + 装进 Recaf 插件目录 + 建 .venv
-./scripts/linux/install.sh
-
-# 2. 启动无头 Recaf（--headless --idle，不需要 DISPLAY），可顺手打开目标 jar
-./scripts/linux/start_recaf_headless.sh start --input /path/to/target.jar
-
-# 3. 启动 MCP 服务：http://127.0.0.1:8751/mcp
-./scripts/linux/start_mcp_http.sh start
+```json
+{
+  "mcpServers": {
+    "recaf": {
+      "type": "stdio",
+      "command": "/path/to/Recaf_MCP/.venv/bin/python",
+      "args": [
+        "/path/to/Recaf_MCP/recaf_mcp_server.py",
+        "--headless", "--auto-start-recaf",
+        "--recaf-jar", "/path/to/Recaf_MCP/libs/recaf.jar",
+        "--recaf-plugins-dir", "/path/to/Recaf_MCP/build/libs"
+      ]
+    }
+  }
+}
 ```
 
-两个启动脚本都支持 `start|stop|status|restart` 和 `--foreground`，日志在 `logs/`，
-pid 在 `.run/`。systemd 用户单元模板见 `contrib/systemd/`。
-
-无头模式下 `fetch_current_class` / `get_selected_text` 这类"读界面"的工具会返回
-`ui_available: false` 和说明，而不是报错；其余工具（类、方法、搜索、xref、重命名、
-导出、字节码编辑）全部可用。`list_recaf_windows` 列出的每个窗口都带 `headless` 字段。
-
-不想手动起进程也行：MCP 服务加 `--auto-start-recaf`（或 `RECAF_AUTO_START=1`），
-第一次需要窗口的工具调用会自动拉起无头 Recaf。DSH 用户可以直接装仓库里的配置型
-bundle：[contrib/dsh-bundle/](contrib/dsh-bundle/)，工具名形如 `mcp__recaf__get_class_source`。
-
-端到端自检：
+DSH 用户可直接装仓库里的配置型 bundle：
 
 ```bash
-./scripts/linux/smoke_test.sh --with-mcp
+dsh plugin install "/path/to/Recaf_MCP/contrib/dsh-bundle"
+# 或 Web UI：Plugins → Add plugin → 选择该目录
 ```
 
-它会起一个一次性的无头 Recaf，验证插件 HTTP API 和 MCP 工具链。完整说明、参数表、
-Dockerfile、排错表见 [docs/linux-headless.md](docs/linux-headless.md)。
+工具名形如 `mcp__recaf__get_class_source`。第一次调用会多等几秒（Recaf 正在启动 + 导入 jar）。
 
----
-
-## MCP 配置
+### MCP 客户端配置（HTTP）
 
 ```json
 {
   "mcpServers": {
     "recaf-mcp": {
+      "type": "http",
       "url": "http://127.0.0.1:8751/mcp"
     }
   }
 }
 ```
 
-## 端口
+## 工具总览（70 个）
+
+| 分组 | 数量 | 工具 |
+|---|---|---|
+| 窗口 | 3 | `list_recaf_windows` `switch_recaf_window` `open_recaf_window` |
+| 工作区 | 7 | `get_workspace_info` `open_workspace` `close_workspace` `add_supporting_resource` `list_supporting_resources` `fetch_current_class` `get_selected_text` |
+| 类 | 9 | `get_all_classes` `get_class_info` `get_class_source` `get_bytecode_of_class` `get_methods_of_class` `get_fields_of_class` `get_inner_classes` `get_annotations_of_class` `get_raw_class_bytes` |
+| 方法 | 3 | `get_method_by_name` `get_method_bytecode` `get_method_info` |
+| 搜索 | 5 | `search_classes_by_name` `search_members_by_name` `search_strings` `search_numbers` `search_instructions` |
+| 交叉引用 | 6 | `get_xrefs_to_class` `get_xrefs_to_method` `get_xrefs_to_field` `get_callers_of_method` `get_callees_of_method` `get_overrides_of_method` |
+| 重命名 | 6 | `rename_class` `rename_method` `rename_field` `rename_package` `rename_local_variable` `apply_mappings` |
+| 反编译器 | 3 | `list_decompilers` `set_active_decompiler` `decompile_class_with` |
+| 继承 | 5 | `get_superclasses` `get_interfaces` `get_direct_subclasses` `get_all_subclasses` `get_implementors` |
+| 资源 | 4 | `get_all_file_names` `get_file_content` `get_manifest` `get_strings_from_resources` |
+| 导出 | 3 | `export_workspace` `get_modified_classes` `revert_class` |
+| 字节码编辑 | 16 | `list_method_instructions` `replace_instruction` `insert_instruction` `remove_instruction` `assemble_method` `replace_method_body` `edit_class_access` `edit_method_access` `edit_field_access` `add_method` `remove_method` `add_field` `remove_field` `set_try_catch_blocks` `replace_class_bytes` `save_workspace` |
+
+典型流程：
+
+```text
+get_all_classes → get_class_source → get_method_bytecode
+  → replace_method_body / assemble_method → get_modified_classes
+  → export_workspace（或 save_workspace）→ revert_class（想撤销时）
+```
+
+## 无头运行
+
+Linux 上没有显示设备时，一切都走 Recaf 原生无头模式：
+
+- 启动参数：`recaf.jar --headless --idle -r <插件目录> -d <数据目录> [-i <jar>]`
+- 插件正常提供 HTTP API；`/instance` 会返回 `headless: true`、`ui_available: false`
+- `fetch_current_class` / `get_selected_text` 依赖编辑器界面，无头下返回
+  `ui_available: false` 和说明而不是报错；其余工具全部可用
+- `--auto-start-recaf`：任一工具调用发现没有任何窗口时，自动拉起一个（无显示时自动用无头），
+  失败后 60 秒内不重试，拉起的进程常驻供后续会话复用
+
+细节（参数表、systemd 单元、Dockerfile、端口、排错）见
+**[docs/linux-headless.md](docs/linux-headless.md)**。
+
+## 多窗口
+
+可以同时跑多个 Recaf 进程（GUI 或无头），每个都加载插件并从 `8750` 起绑定第一个空闲端口。
+
+| 工具 | 作用 |
+|---|---|
+| `list_recaf_windows` | 列出窗口，形如 `1:client.jar`、`2:server.jar`，并标出默认窗口与 `headless` 标记 |
+| `switch_recaf_window(window)` | 设为默认，之后不带 `window` 的调用都走它 |
+| `open_recaf_window(jar_path?, wait_seconds?)` | 再开一个 Recaf（模式跟随 `--headless/--gui` 或已有窗口），可顺带打开 jar |
+
+其它工具都有可选参数 `window`：`"2"`、`"2:client.jar"`，或 jar 名里能唯一匹配的一段。
+编号后面带 jar 名时必须与实际一致，过期的引用会被拒绝，不会改错 jar。
+
+## 配置参考
+
+### MCP 服务命令行
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--http` | 关 | 用 streamable HTTP 提供 MCP；不加则走 stdio |
+| `--host` / `--port` | `127.0.0.1` / `8751` | MCP 监听地址与端口（非本机监听无鉴权，见[安全](#安全)） |
+| `--recaf-host` / `--recaf-port` | `127.0.0.1` / `8750` | 插件地址与扫描起点（扫描 20 个端口） |
+| `--recaf-jar` | `$RECAF_JAR`、`libs/recaf.jar` | `open_recaf_window` / 自动拉起用的 recaf.jar |
+| `--headless` / `--gui` | 自动 | 新进程用无头还是 GUI；默认 Linux 无 `DISPLAY` 时无头 |
+| `--recaf-plugins-dir` | `$RECAF_PLUGIN_DIR`、`build/libs` | 传给无头 Recaf 的 `-r` |
+| `--recaf-data-dir` | `$RECAF_DATA_DIR` | 传给无头 Recaf 的 `-d` |
+| `--java` / `--java-args` | `$RECAF_JAVA` / `$RECAF_JAVA_ARGS` | java 路径与额外 JVM 参数 |
+| `--auto-start-recaf` | 关 | 没有窗口时自动拉起（`--no-auto-start-recaf` 可强制关闭） |
+| `--auto-start-wait` | `90` | 自动拉起时等插件就绪的秒数 |
+| `--recaf-launch-log` | `$RECAF_LAUNCH_LOG` | 把新进程输出追加到文件（调试无头启动很有用） |
+
+### 环境变量
+
+| 变量 | 作用 |
+|---|---|
+| `RECAF_JAR` | recaf.jar 路径（覆盖 `libs/recaf.jar`） |
+| `RECAF_PLUGIN_DIR` / `RECAF_PLUGIN_INSTALL_DIR` | 插件目录 / 安装目标目录 |
+| `RECAF_DATA_DIR`、`RECAF_JAVA`、`RECAF_JVM_ARGS` | 无头实例的数据目录、java、JVM 参数 |
+| `RECAF_MCP_HOST` / `RECAF_MCP_PORT` | 插件自身监听地址 / 起始端口（插件读取） |
+| `RECAF_HOST` / `RECAF_PORT` | MCP 服务看到的插件地址 / 起始端口 |
+| `RECAF_HEADLESS`、`RECAF_AUTO_START`、`RECAF_AUTO_START_WAIT` | 无头与自动拉起开关 |
+| `RECAF_MCP_HTTP_HOST` / `RECAF_MCP_HTTP_PORT` | Linux 脚本里 MCP 服务的监听地址 / 端口 |
+
+### 端口
 
 | 组件 | 地址 |
 |---|---|
@@ -226,67 +241,98 @@ Dockerfile、排错表见 [docs/linux-headless.md](docs/linux-headless.md)。
 
 ```bash
 curl http://127.0.0.1:8750/health      # ok
-curl http://127.0.0.1:8750/instance    # 进程/端口/是否有工作区/是否无头
+curl http://127.0.0.1:8750/instance    # pid / 端口 / 工作区 / headless 标记
 ```
 
-```powershell
-Invoke-WebRequest http://127.0.0.1:8750/health
-```
+## 验证与测试
 
----
-
-## 多 Recaf 窗口
-
-可以同时运行多个 Recaf 进程，各自打开不同的 jar。每个进程都会加载插件，并从 `8750` 起绑定第一个空闲端口；MCP 服务按首次发现的顺序给它们编号。编号在 MCP 服务运行期间不会复用，所以 `2:client.jar` 不会悄悄变成另一个 jar。
-
-| 工具 | 作用 |
+| 命令 | 内容 |
 |---|---|
-| `list_recaf_windows` | 列出所有窗口，形如 `1:client.jar`、`2:server.jar`，并标出默认窗口 |
-| `switch_recaf_window(window)` | 把某个窗口设为默认，之后不带 `window` 的调用都走它 |
-| `open_recaf_window(jar_path?, wait_seconds?)` | 再开一个 Recaf，可顺带打开一个 jar；不会改动默认窗口 |
+| `./test.sh` | 构建 + Python 入口 + 脚本语法 + 单元测试 |
+| `./test.sh --headless` | 再加无头端到端冒烟 |
+| `./scripts/linux/smoke_test.sh --with-mcp` | 一次性无头 Recaf：`/health`、`/instance`、打开 jar、反编译、无头降级，并经 MCP 客户端调用工具 |
+| `./scripts/linux/smoke_autostart.sh` | 零窗口 → 首次工具调用自动拉起 Recaf 并打开工作区 |
+| `.venv/bin/python scripts/mcp_tool_matrix.py --jar <jar>` | **全量矩阵**：stdio 起服务，逐个调用 70 个工具（110 次调用），逐行 PASS/FAIL |
 
-其余工具都有可选参数 `window`：填 `"2"`、`"2:client.jar"`，或者 jar 名里能唯一匹配的一段。编号后面带了 jar 名时必须和该窗口当前的 jar 对得上，过期的引用会被拒绝，而不是改错 jar。
+矩阵示例（`Nyx.jar`，75 MB Fabric mod）：
 
-- 只开了一个窗口时，可以不传 `window`。
-- 开了多个窗口又没选默认窗口时，调用会失败并返回窗口列表，不会猜。
-- `switch_recaf_window` 设置的默认窗口由 MCP 服务的所有客户端共享（HTTP 传输没有按客户端区分的会话）。多个 agent 并行时，请各自显式传 `window`。
-- `open_recaf_window` 会按已有窗口的启动方式（同一个 `java` 和 jar，从其进程里读取）再开一个。没有任何窗口时，依次用 `--recaf-jar`、`RECAF_JAR`、`libs/recaf.jar`。
+```text
+MCP tool matrix: 110 calls, 110 passed, 0 failed
+  windows / workspace / target jar (read-only) / search / xrefs+inheritance
+  decompilers / scratch workspace / bytecode editing / refactor / export
+all 70 tools behaved as expected
+```
 
-仍在用旧版插件（没有 `/instance`）的窗口也能被发现，但不能被 `open_recaf_window` 当作克隆模板。
+## 已知限制
 
----
+1. `get_modified_classes` 在 `rename_package` / `apply_mappings` 之后会返回 0
+   （Recaf 的映射应用会重建 bundle 并清空 dirty 历史），但内容确实与原始 jar 不同。
+2. `assemble_method` 的 `LABEL` / `TRYCATCH` 文本指令会生成非法栈帧
+   （ASM `NegativeArraySizeException`）：不含标签的指令体正常，try-catch 请用
+   `set_try_catch_blocks` 作用在已有标签的方法上。
+3. `search_strings` 只扫描 `LDC` 字符串常量，`invokedynamic` 字符串拼接的 recipe 不算命中。
+4. 无头模式下 `fetch_current_class` / `get_selected_text` 没有数据（这是 UI 概念，属预期）。
+
+## 排错
+
+| 现象 | 处理 |
+|---|---|
+| `Missing recaf.jar` | 仓库已带 `libs/recaf.jar`；换平台时用 `RECAF_JAR` 指过去 |
+| `plugin did not answer within 90s` | 看 `logs/recaf-headless.log`；常见是堆内存不足（`--jvm-args -Xmx4g`）或 jar 架构不对 |
+| 工具报 `no Recaf window found` | Recaf 未启动或插件未加载；`curl 127.0.0.1:8750/health` 应为 `ok`，或加 `--auto-start-recaf` |
+| `current-class` 返回 `ui_available: false` | 正常：无头模式没有 UI，请显式传 `class_name` |
+| `Address already in use` | 8750–8769 已被占满，先停掉多余实例 |
+| MCP 客户端看不到工具 | 检查 `--http`/stdio 配置与 `mcpServers` 名字；DSH 里新会话生效 |
+
+## 安全
+
+MCP 服务与插件都是**无鉴权的本地 HTTP**：
+
+```bash
+python recaf_mcp_server.py --http --host 0.0.0.0   # ⚠️ 暴露到网络
+```
+
+默认只监听 `127.0.0.1`。不要绑定非本机地址，除非已在防火墙 / VPN 之后。
 
 ## 仓库结构
 
 ```text
 .
-├── src/                  # Java 插件源码
-├── mcp-server/           # Python MCP 服务端
-├── scripts/linux/        # Linux 无头启动 / 安装 / 自检脚本
-├── contrib/systemd/      # systemd 用户单元模板
-├── contrib/dsh-bundle/   # DSH 配置型 bundle（stdio，自动拉起）
-├── docs/linux-headless.md# 无头运行完整说明
-├── libs/                 # recaf.jar 存放处
-├── recaf_mcp_server.py   # MCP 服务器入口
-├── requirements.txt      # Python 依赖
-├── .mcp.json             # 项目 MCP 配置
-└── README.md
+├── src/                      # Java 插件（HTTP 路由 + ASM 字节码编辑）
+├── mcp-server/               # Python MCP 服务（工具定义 + 窗口发现）
+├── scripts/
+│   ├── linux/                # 无头启动 / 安装 / 冒烟 / 自检脚本
+│   └── mcp_tool_matrix.py    # 全量工具矩阵
+├── contrib/
+│   ├── dsh-bundle/           # DSH 配置型 bundle（stdio + 自动拉起）
+│   └── systemd/              # systemd 用户单元模板
+├── docs/linux-headless.md    # 无头运行完整指南
+├── libs/recaf.jar            # 固定版本的构建依赖
+├── recaf_mcp_server.py       # MCP 服务入口
+├── requirements.txt
+├── gradlew / build.gradle.kts
+└── README.md / README_CN.md
 ```
 
----
+## 开发
 
-## 安全警告
-
-以下方式会暴露 MCP 服务器在公网且无认证：
-
-```powershell
-python recaf_mcp_server.py --http --host 0.0.0.0
+```bash
+./gradlew jar                                  # 构建插件（依赖 libs/recaf.jar）
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+./test.sh --headless                           # 构建 + 单测 + 无头端到端
 ```
 
-默认使用 localhost，或置于防火墙/VPN 之后。
+- 插件编译目标 Java 25（`build.gradle.kts` 的 toolchain），Gradle 9.4.1 wrapper。
+- 单元测试在 `mcp-server/tests/`，覆盖无头启动参数与自动拉起决策。
+- 发布流程见 [PUBLISHING.md](PUBLISHING.md)。
 
----
+## 许可与致谢
 
-<p align="center">
-  <em>LLM 客户端 -> MCP 服务器 -> Recaf 插件 -> Recaf 工作区</em>
-</p>
+[Apache-2.0](LICENSE)。
+
+本项目是 [jadx-mcp-server](https://github.com/zinja-coder/jadx-mcp-server)（作者 Jafar Pathan / zinja-coder）的
+Recaf 改写版本，沿用其 MCP 架构与工具命名风格。Recaf 本身由 [Col-E](https://github.com/Col-E) 开发。
+
+<div align="center">
+<sub>LLM 客户端 → MCP 服务 → Recaf 插件 → Recaf 工作区</sub>
+</div>
