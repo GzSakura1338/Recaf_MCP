@@ -46,6 +46,8 @@ class IdleStopTest(unittest.TestCase):
         windows.idle_stop_seconds = 0.0
         windows._last_activity = 0.0
         windows._idle_thread = None
+        windows._state_written = False
+        self.addCleanup(setattr, windows, "_state_written", False)
         self.addCleanup(windows._owned_windows.clear)
         self.addCleanup(windows._owned_procs.clear)
         self.addCleanup(setattr, windows, "idle_stop_seconds", 0.0)
@@ -90,7 +92,7 @@ class IdleStopTest(unittest.TestCase):
         self.assertEqual(stopped, [4321])
         self.assertEqual(seen, [4321])
         self.assertEqual(windows.owned_windows(), {})
-        self.assertEqual(json.loads(self.state.read_text()), {"pids": []})
+        self.assertEqual(json.loads(self.state.read_text())["pids"], [])
 
     def test_failed_terminate_keeps_the_pid_tracked(self):
         windows._owned_windows[4321] = "1:(no workspace)"
@@ -142,6 +144,36 @@ class IdleStopTest(unittest.TestCase):
             self.assertFalse(windows._looks_like_our_recaf(2))
         with mock.patch.object(windows, "_proc_command_line", return_value=foreign):
             self.assertFalse(windows._looks_like_our_recaf(3))
+
+    def test_state_file_names_its_owner(self):
+        windows._remember_owned(WINDOW)
+        self.assertEqual(json.loads(self.state.read_text())["owner"], __import__("os").getpid())
+
+    def test_a_live_owner_blocks_adoption(self):
+        # A second server (script, test, another host) must not steal and then
+        # stop Recaf that the first server is still using.
+        self.state.write_text(json.dumps({"owner": 1, "pids": [
+            {"pid": 4321, "label": "1:(no workspace)"},
+        ]}))
+        with mock.patch.object(windows, "_looks_like_our_recaf", return_value=True):
+            adopted = windows.adopt_previous_windows()
+        self.assertEqual(adopted, [])
+        self.assertEqual(windows.owned_windows(), {})
+        self.assertEqual(json.loads(self.state.read_text())["owner"], 1)  # untouched
+
+    def test_a_dead_owner_still_allows_adoption(self):
+        self.state.write_text(json.dumps({"owner": 999_999_999, "pids": [
+            {"pid": 4321, "label": "1:(no workspace)"},
+        ]}))
+        with mock.patch.object(windows, "_looks_like_our_recaf", return_value=True):
+            adopted = windows.adopt_previous_windows()
+        self.assertEqual(adopted, [4321])
+        self.assertEqual(json.loads(self.state.read_text())["pids"], [{"pid": 4321, "label": "1:(no workspace)"}])
+
+    def test_exit_keeps_a_state_file_it_did_not_write(self):
+        self.state.write_text(json.dumps({"owner": 1, "pids": []}))
+        windows._stop_owned_on_exit()
+        self.assertTrue(self.state.exists())
 
     def test_exit_hook_stops_owned_windows_and_clears_state(self):
         windows._owned_windows[4321] = "1:(no workspace)"

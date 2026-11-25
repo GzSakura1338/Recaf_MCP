@@ -187,7 +187,8 @@ Linux 上没有显示设备时，一切都走 Recaf 原生无头模式：
   失败后 60 秒内不重试
 - `--recaf-idle-stop N`：本服务拉起的 Recaf 在 N 秒没有 Recaf 工具调用后停止，服务退出时也一并停止，
   所以**常驻的只有 Python 进程**；下次调用会重新拉起（几秒）。只回收本服务启动的进程，
-  你自己用脚本/GUI 开的 Recaf 不会被碰
+  你自己用脚本/GUI 开的 Recaf 不会被碰。所有权记在 `recaf-mcp-owned.json`（含 owner pid），
+  宿主重载后新服务能认领上一任留下的 Recaf，但**另一个还活着的服务**拥有的进程不会被抢
 
 细节（参数表、systemd 单元、Dockerfile、端口、排错）见
 **[docs/linux-headless.md](docs/linux-headless.md)**。
@@ -228,11 +229,14 @@ python recaf_mcp_server.py --http --multi-recaf   # 或 RECAF_SINGLE=0
 | 单次工具调用 CPU | ~0.8 ms | 修复前 30 ms（每次调用都新建 `httpx.AsyncClient`，光 TLS 上下文就 18 ms） |
 | 单次工具调用延迟 | ~0.8 ms | keep-alive 复用连接，不再每次握手 |
 | 每次调用的端口探测 | 0 次 | 解析结果缓存 30 s；连接失败时失效并重试 |
+| 列窗口（`list_recaf_windows`） | 0.002 ms | 状态查询直接读缓存；冷缓存一次扫描约 29 ms（压测前是每次调用重扫） |
 
 做法：
 
 - 所有工具调用共用一个 keep-alive `httpx.AsyncClient`（按事件循环复用，换循环才重建）；端口探测也复用同一个客户端。
 - 窗口解析走乐观缓存：30 s 内复用上次的窗口列表、不扫端口；请求真的失败才 `invalidate()` 重试，所以不会用错窗口。
+- 列窗口不再强制重扫：`list_recaf_windows` 是状态查询，读 3 s 内的缓存；真正用窗口的调用会证明它是否还活着。
+- 扫描的单端口预算从 2 s 降到 0.75 s：同网段若有别的服务卡住，不会把每次扫描拖到 2 s。
 - 空闲回收事件驱动：有调用就 `set()` 事件重算期限，没有调用就一次长等待；停止失败退避 30 s，不忙等。
 - 可复现：`python scripts/bench_python_overhead.py`（假插件只答 `/instance`、`/health`、`/class-info`，量每调用 CPU / 内存 / 连接数 / 空闲 CPU）。
 

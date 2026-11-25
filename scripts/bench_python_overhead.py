@@ -9,8 +9,10 @@ numbers measure this server (discovery, HTTP client, JSON) and not Recaf.
 
 Reported per call: wall time (latency), CPU time (the part that costs battery
 and steals a core), and the number of TCP connections opened (each new
-connection is a syscall + handshake; a reused one is free). Idle cost is the
-CPU time burned over one second with no call at all.
+connection is a syscall + handshake; a reused one is free). "list_windows" is
+the status query a model usually calls first, reported warm (cached list) next
+to what one cold scan of the port range costs. Idle cost is the CPU time burned
+over one second with no call at all.
 """
 
 import argparse
@@ -111,6 +113,27 @@ async def _measure(count: int) -> dict:
     }
 
 
+async def _list_windows(count: int) -> dict:
+    """Cost of a status query (list_recaf_windows), excluding the first cold scan."""
+    await windows.list_windows()
+    cpu_before = time.process_time()
+    wall_before = time.perf_counter()
+    for _ in range(count):
+        await windows.list_windows()
+    wall = time.perf_counter() - wall_before
+    cpu = time.process_time() - cpu_before
+    windows.invalidate()          # a cold cache has to probe the whole port range
+    scan_before = time.perf_counter()
+    await windows.list_windows()
+    scan_ms = (time.perf_counter() - scan_before) * 1000
+    return {
+        "calls": count,
+        "wall_ms_per_call": round(wall / count * 1000, 3),
+        "cpu_ms_per_call": round(cpu / count * 1000, 3),
+        "cold_scan_ms": round(scan_ms, 3),
+    }
+
+
 async def _idle_cpu(seconds: float) -> dict:
     cpu_before = time.process_time()
     wall_before = time.perf_counter()
@@ -132,6 +155,7 @@ def main() -> int:
     windows.invalidate()
 
     result = asyncio.run(_measure(args.calls))
+    result["list_windows"] = asyncio.run(_list_windows(args.calls))
     result["idle"] = asyncio.run(_idle_cpu(args.idle_seconds))
     result["rss_mb"] = round(_rss_kb() / 1024, 1)
     print(json.dumps(result, indent=2, sort_keys=True))

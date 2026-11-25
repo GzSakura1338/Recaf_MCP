@@ -37,7 +37,11 @@ CACHE_TTL_SECONDS = 3.0
 # tool call itself proves whether the window answers, and a connection failure
 # invalidates the list and retries. Probing 20 ports per call is pure overhead.
 OPTIMISTIC_TTL_SECONDS = 30.0
-PROBE_TIMEOUT = httpx.Timeout(2.0, connect=0.3)
+# A scan runs one request per port at once and pays the slowest port's latency,
+# so the budget must stay small: the plugin answers in milliseconds on loopback,
+# while a foreign service in the same range can stall. This bound is what a scan
+# costs at worst per call.
+PROBE_TIMEOUT = httpx.Timeout(0.75, connect=0.25)
 # Retry a failed idle stop this long after the attempt, instead of spinning.
 IDLE_RETRY_SECONDS = 30.0
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -217,7 +221,14 @@ def _remember_owned(window: Dict[str, Any], process: Any = None) -> None:
 #
 # A host reloads the MCP server (config change, reconnect) while the Java process
 # it started keeps running. The pid list is kept on disk, so the next server
-# instance can adopt those processes and still recycle them.
+# instance can adopt those processes and still recycle them. The file also names
+# its owner: a *second* server (a script, a test, a second host) must not adopt
+# and then stop Recaf that the first one is still using.
+
+# True once this process wrote the state file, so exiting never deletes a file
+# another server owns.
+_state_written = False
+
 
 def _state_path() -> Path:
     override = os.environ.get("RECAF_MCP_STATE_FILE")
@@ -228,22 +239,44 @@ def _state_path() -> Path:
 
 
 def _save_state() -> None:
+    global _state_written
     try:
         path = _state_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"pids": [{"pid": pid, "label": label}
+        path.write_text(json.dumps({"owner": os.getpid(),
+                                    "pids": [{"pid": pid, "label": label}
                                              for pid, label in _owned_windows.items()]}))
+        _state_written = True
     except OSError:
         pass
 
 
-def _load_state() -> List[Dict[str, Any]]:
+def _load_state_doc() -> Dict[str, Any]:
     try:
         data = json.loads(_state_path().read_text())
     except (OSError, ValueError):
-        return []
-    entries = data.get("pids") if isinstance(data, dict) else None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _load_state() -> List[Dict[str, Any]]:
+    entries = _load_state_doc().get("pids")
     return entries if isinstance(entries, list) else []
+
+
+def _pid_alive(pid: int) -> bool:
+    """Cheap liveness check; only used to decide whether another server still owns pids."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True          # exists, just not ours to signal
+    except OSError:
+        return False
+    return True
 
 
 def _looks_like_our_recaf(pid: int) -> bool:
@@ -260,6 +293,15 @@ def _looks_like_our_recaf(pid: int) -> bool:
 
 def adopt_previous_windows() -> List[int]:
     """Take over Recaf processes a previous server instance left behind."""
+    owner = _load_state_doc().get("owner")
+    try:
+        owner_pid = int(owner) if owner is not None else 0
+    except (TypeError, ValueError):
+        owner_pid = 0
+    if owner_pid and owner_pid != os.getpid() and _pid_alive(owner_pid):
+        # Another live server still owns these pids; leave both alone.
+        _log(f"Recaf pids in {_state_path()} belong to the live server pid {owner_pid}; not adopting")
+        return []
     adopted: List[int] = []
     for entry in _load_state():
         try:
@@ -402,7 +444,8 @@ def _stop_owned_on_exit() -> None:
     """A stdio server owns its Recaf processes: do not leave Java behind."""
     stop_owned_windows_now()
     try:
-        if not _owned_windows:
+        # Delete only a file this process wrote: another live server may own it.
+        if not _owned_windows and _state_written:
             _state_path().unlink(missing_ok=True)
     except OSError:
         pass
@@ -640,7 +683,10 @@ async def resolve_base() -> str:
 
 async def list_windows() -> Dict[str, Any]:
     _touch()
-    found = await _windows(refresh=True)
+    # Listing is a status query: answer from the cache and let the tool call that
+    # actually uses a window prove it is alive (a failed request invalidates the
+    # cache). Re-probing 20 ports on every list costs more than it tells anyone.
+    found = await _windows()
     current = _find(found, _active_window) if _active_window is not None else None
     result: Dict[str, Any] = {
         "windows": [describe(w, _active_window) for w in found],

@@ -193,7 +193,9 @@ With no display, everything runs on Recaf's native headless mode:
 - `--recaf-idle-stop N`: that process is stopped after N seconds without a Recaf tool call, and
   when the server exits, so **only the Python process stays resident**; the next call starts a
   fresh Recaf (a few seconds). Only processes started by this server are touched — a Recaf you
-  launched yourself (GUI or scripts) is never stopped
+  launched yourself (GUI or scripts) is never stopped. Ownership is recorded in
+  `recaf-mcp-owned.json` (with an `owner` pid), so a server reloaded by the host adopts what its
+  predecessor left behind, while processes owned by a *still running* server are left alone
 
 Option tables, systemd units, Dockerfile, ports and troubleshooting:
 **[docs/linux-headless.md](docs/linux-headless.md)** (Chinese; the commands are language-neutral).
@@ -237,13 +239,15 @@ While idle it does one thing: wait for MCP requests. Measured on 8-core ARM Linu
 | CPU per tool call | ~0.8 ms | Was 30 ms (a fresh `httpx.AsyncClient` per call: ~18 ms just to build the TLS context) |
 | Latency per tool call | ~0.8 ms | Keep-alive reuses the connection, no handshake per call |
 | Port probes per call | 0 | Resolution is cached for 30 s; a failed request invalidates and retries |
+| Listing windows (`list_recaf_windows`) | 0.002 ms | A status query answers from the 3 s cache; one cold scan costs ~29 ms |
 
 How:
 
 - Every tool call shares one keep-alive `httpx.AsyncClient` (rebuilt only when the event loop changes); port discovery reuses one too.
 - Window resolution is optimistic: the last window list is reused for 30 s without touching the port range, and only a failed request triggers `invalidate()` + retry — so it can never hit the wrong window.
+- Listing windows does not force a rescan, and a single probe may burn 0.75 s instead of 2 s, so a stalled foreign service in the port range cannot slow a scan down.
 - Idle recycling is event-driven: a tool call `set()`s the event to recompute the deadline, no call means one long wait; a failed stop backs off 30 s instead of spinning.
-- Reproduce it: `python scripts/bench_python_overhead.py` (a fake plugin answers `/instance`, `/health`, `/class-info` and the script reports CPU/memory/connections per call plus idle CPU).
+- Reproduce it: `python scripts/bench_python_overhead.py` (a fake plugin answers `/instance`, `/health`, `/class-info`; the script reports CPU, memory and connections per call, the window-list cost, and idle CPU).
 
 ## Configuration reference
 

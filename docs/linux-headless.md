@@ -194,6 +194,8 @@ MCP 客户端配置：
 
 - 本服务启动的 Recaf 在 **N 秒没有 Recaf 工具调用**后自动停止；服务退出（SIGTERM/SIGINT/stdio 断开）时也一并停止
 - 只回收**本服务启动**的进程；你自己用 `start_recaf_headless.sh` 或 GUI 开的 Recaf 不受影响
+- 所有权写在 `${RECAF_MCP_STATE_FILE:-$XDG_RUNTIME_DIR/recaf-mcp-owned.json}`（含 `owner` pid）：
+  宿主重载后新服务会认领上一任留下的 Recaf，但若记录里的 owner 进程还活着就不碰（多个服务不会互抢）
 - 下次工具调用重新拉起（无头启动几秒 + 导入 jar 的时间），列表/切换窗口这类调用不会主动拉起
 - `N=0`（默认）表示一直保留，行为与之前一致
 - 环境变量等价物：`RECAF_IDLE_STOP=180`

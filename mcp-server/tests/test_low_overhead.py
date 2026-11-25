@@ -142,6 +142,46 @@ class ResolveCacheTest(_Reset):
                 asyncio.run(windows.resolve("7"))
         self.assertEqual(calls, [1])
 
+    def test_listing_answers_from_the_cache(self):
+        windows._cache = [WINDOW]
+        windows._cache_time = time.monotonic()
+        scans = []
+
+        async def fake_discover():
+            scans.append(1)
+            return [WINDOW]
+
+        with mock.patch.object(windows, "discover", fake_discover):
+            listed = asyncio.run(windows.list_windows())
+            asyncio.run(windows.list_windows())
+        self.assertEqual([w["label"] for w in listed["windows"]], ["1:(no workspace)"])
+        self.assertEqual(scans, [])  # listing is a status query, not a scan
+
+    def test_listing_scans_once_when_the_cache_is_cold(self):
+        scans = []
+        probed = []
+
+        async def fake_probe(client, port):
+            probed.append(port)
+            return WINDOW if port == 8750 else None
+
+        async def fake_discover():
+            scans.append(1)
+            windows._cache, windows._cache_time = [WINDOW], time.monotonic()
+            return [WINDOW]
+
+        with mock.patch.object(windows, "discover", fake_discover):
+            asyncio.run(windows.list_windows())
+            asyncio.run(windows.list_windows())
+        self.assertEqual(scans, [1])
+        self.assertEqual(probed, [])
+
+    def test_a_scan_cannot_burn_the_whole_probe_budget_per_port(self):
+        # The scan runs one request per port concurrently, so its worst case is
+        # one probe timeout; keep that small enough to stay invisible.
+        self.assertLessEqual(windows.PROBE_TIMEOUT.read, 1.0)
+        self.assertLessEqual(windows.PROBE_TIMEOUT.connect, 0.3)
+
 
 class IdleWatchdogTest(_Reset):
     def test_touch_wakes_the_watchdog(self):
