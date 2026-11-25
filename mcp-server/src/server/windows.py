@@ -13,6 +13,7 @@ different jar after window 2 is closed.
 import asyncio
 import atexit
 import contextvars
+import json
 import os
 import re
 import shlex
@@ -20,6 +21,8 @@ import signal
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -69,7 +72,7 @@ _auto_start_failed_at = 0.0
 _owned_windows: Dict[int, str] = {}
 _owned_procs: Dict[int, Any] = {}
 _last_activity = 0.0
-_idle_task: Optional[asyncio.Task] = None
+_idle_thread: Optional[threading.Thread] = None
 
 
 def _log(message: str) -> None:
@@ -189,35 +192,100 @@ def _remember_owned(window: Dict[str, Any], process: Any = None) -> None:
     _touch()
     if idle_stop_seconds > 0:
         _log(f"started Recaf pid {pid} ({label}); it stops after {int(idle_stop_seconds)}s without tool calls")
-    _ensure_idle_watchdog()
+    _save_state()
+    _start_idle_thread()
 
 
-def _ensure_idle_watchdog() -> None:
-    """Start the idle watchdog once, inside a running event loop."""
-    global _idle_task
+# --- ownership state ------------------------------------------------------
+#
+# A host reloads the MCP server (config change, reconnect) while the Java process
+# it started keeps running. The pid list is kept on disk, so the next server
+# instance can adopt those processes and still recycle them.
+
+def _state_path() -> Path:
+    override = os.environ.get("RECAF_MCP_STATE_FILE")
+    if override:
+        return Path(override).expanduser()
+    base = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    return Path(base) / "recaf-mcp-owned.json"
+
+
+def _save_state() -> None:
+    try:
+        path = _state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"pids": [{"pid": pid, "label": label}
+                                             for pid, label in _owned_windows.items()]}))
+    except OSError:
+        pass
+
+
+def _load_state() -> List[Dict[str, Any]]:
+    try:
+        data = json.loads(_state_path().read_text())
+    except (OSError, ValueError):
+        return []
+    entries = data.get("pids") if isinstance(data, dict) else None
+    return entries if isinstance(entries, list) else []
+
+
+def _looks_like_our_recaf(pid: int) -> bool:
+    """Adopt only processes that are clearly a headless Recaf this tool started."""
+    command = _proc_command_line(pid) or _ps_command_line(pid) or []
+    if not command or "--headless" not in command:
+        return False
+    if not any(part.endswith("recaf.jar") for part in command):
+        return False
+    if plugin_dir and not any(part == plugin_dir for part in command):
+        return False
+    return True
+
+
+def adopt_previous_windows() -> List[int]:
+    """Take over Recaf processes a previous server instance left behind."""
+    adopted: List[int] = []
+    for entry in _load_state():
+        try:
+            pid = int(entry.get("pid") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pid <= 0 or pid in _owned_windows or not _looks_like_our_recaf(pid):
+            continue
+        _owned_windows[pid] = str(entry.get("label") or f"pid {pid}")
+        adopted.append(pid)
+        _log(f"adopted Recaf pid {pid} ({_owned_windows[pid]}) from a previous server instance")
+    if adopted:
+        # Give an adopted window a full idle window instead of stopping it at once.
+        _touch()
+        _start_idle_thread()
+    _save_state()
+    return adopted
+
+
+def _start_idle_thread() -> None:
+    """Watchdog thread: also works before an event loop exists (after adoption)."""
+    global _idle_thread
     if idle_stop_seconds <= 0 or not _owned_windows:
         return
-    if _idle_task is not None and not _idle_task.done():
+    if _idle_thread is not None and _idle_thread.is_alive():
         return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
-    _idle_task = loop.create_task(_idle_loop())
+    _idle_thread = threading.Thread(target=_idle_loop, name="recaf-idle-stop", daemon=True)
+    _idle_thread.start()
 
 
-async def _idle_loop() -> None:
-    global _idle_task
+def _should_stop_idle(now: Optional[float] = None) -> bool:
+    if idle_stop_seconds <= 0 or not _owned_windows:
+        return False
+    return ((now if now is not None else time.monotonic()) - _last_activity) >= idle_stop_seconds
+
+
+def _idle_loop() -> None:
     while True:
-        await asyncio.sleep(IDLE_CHECK_INTERVAL)
+        time.sleep(IDLE_CHECK_INTERVAL)
         if not _owned_windows:
-            _idle_task = None
             return
-        if idle_stop_seconds <= 0:
-            continue
-        if time.monotonic() - _last_activity < idle_stop_seconds:
-            continue
-        await stop_owned_windows()
+        if _should_stop_idle():
+            stop_owned_windows_now()
 
 
 async def stop_owned_windows() -> List[int]:
@@ -233,6 +301,7 @@ async def stop_owned_windows() -> List[int]:
         else:
             _log(f"could not stop Recaf pid {pid} ({label}); leaving it running")
     if stopped:
+        _save_state()
         invalidate()
     return stopped
 
@@ -251,11 +320,14 @@ def stop_owned_windows_now() -> List[int]:
     stopped: List[int] = []
     for pid, label in list(_owned_windows.items()):
         _log(f"stopping Recaf pid {pid} ({label}): this MCP server is shutting down")
-        _terminate_pid(pid, wait=3.0)
+        if not _terminate_pid(pid, wait=3.0):
+            _log(f"could not stop Recaf pid {pid} ({label})")
+            continue
         _reap(pid)
         _owned_windows.pop(pid, None)
         stopped.append(pid)
     if stopped:
+        _save_state()
         invalidate()
     return stopped
 
@@ -295,6 +367,11 @@ def _terminate_pid(pid: int, wait: float = 8.0) -> bool:
 def _stop_owned_on_exit() -> None:
     """A stdio server owns its Recaf processes: do not leave Java behind."""
     stop_owned_windows_now()
+    try:
+        if not _owned_windows:
+            _state_path().unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def describe(window: Dict[str, Any], active: Optional[int] = None) -> Dict[str, Any]:

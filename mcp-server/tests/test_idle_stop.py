@@ -1,14 +1,15 @@
 """
 Unit tests for the idle lifecycle: only the Python process stays resident.
 
-With an idle timeout the server stops the Recaf processes it started, keeps the
-user's own windows alone, and cleans up when it exits.
+Covers the idle decision, the watchdog thread, the ownership state file used to
+adopt processes after a host reload, and the exit/signal cleanup.
 
     python -m unittest discover -s mcp-server/tests -v
 """
 
-import asyncio
+import json
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -31,16 +32,25 @@ WINDOW = {
 }
 
 
-class IdleStopTest(unittest.IsolatedAsyncioTestCase):
+class IdleStopTest(unittest.TestCase):
     def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state = Path(self.tmp.name) / "owned.json"
+        patcher = mock.patch.dict("os.environ", {"RECAF_MCP_STATE_FILE": str(self.state)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
         windows._owned_windows.clear()
+        windows._owned_procs.clear()
         windows.idle_stop_seconds = 0.0
         windows._last_activity = 0.0
-        windows._idle_task = None
+        windows._idle_thread = None
         self.addCleanup(windows._owned_windows.clear)
+        self.addCleanup(windows._owned_procs.clear)
         self.addCleanup(setattr, windows, "idle_stop_seconds", 0.0)
         self.addCleanup(setattr, windows, "_last_activity", 0.0)
-        self.addCleanup(setattr, windows, "_idle_task", None)
+        self.addCleanup(setattr, windows, "_idle_thread", None)
 
     def test_configure_sets_idle_timeout(self):
         windows.configure_launch(idle_stop=45)
@@ -48,77 +58,101 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         windows.configure_launch(idle_stop=-5)
         self.assertEqual(windows.idle_stop_seconds, 0.0)
 
-    def test_remember_owned_tracks_the_pid(self):
+    def test_remember_owned_tracks_the_pid_and_state(self):
         windows._remember_owned(WINDOW)
         self.assertEqual(windows.owned_windows(), {4321: "1:(no workspace)"})
         self.assertGreater(windows._last_activity, 0.0)
+        saved = json.loads(self.state.read_text())
+        self.assertEqual(saved["pids"], [{"pid": 4321, "label": "1:(no workspace)"}])
 
-    async def test_stop_owned_windows_terminates_only_owned_pids(self):
-        windows._owned_windows[4321] = "1:(no workspace)"
-        windows._owned_windows[9876] = "2:(no workspace)"
-        seen = []
-
-        def fake_terminate(pid, wait=8.0):
-            seen.append(pid)
-            return True
-
-        with mock.patch.object(windows, "_terminate_pid", fake_terminate):
-            stopped = await windows.stop_owned_windows()
-        self.assertEqual(sorted(stopped), [4321, 9876])
-        self.assertEqual(sorted(seen), [4321, 9876])
-        self.assertEqual(windows.owned_windows(), {})
-
-    async def test_failed_terminate_keeps_the_pid_tracked(self):
-        windows._owned_windows[4321] = "1:(no workspace)"
-        with mock.patch.object(windows, "_terminate_pid", return_value=False):
-            stopped = await windows.stop_owned_windows()
-        self.assertEqual(stopped, [])
-        self.assertIn(4321, windows.owned_windows())
-
-    async def test_watchdog_stops_after_idle_timeout(self):
-        windows.idle_stop_seconds = 30
-        windows._owned_windows[4321] = "1:(no workspace)"
-        windows._last_activity = time.monotonic() - 31
-        terminated = []
-        with mock.patch.object(windows, "IDLE_CHECK_INTERVAL", 0.01), \
-                mock.patch.object(windows, "_terminate_pid", lambda pid, wait=8.0: terminated.append(pid) or True):
-            await windows._idle_loop()
-        self.assertEqual(terminated, [4321])
-        self.assertEqual(windows.owned_windows(), {})
-
-    async def test_watchdog_keeps_a_busy_window(self):
+    def test_should_stop_idle_respects_timeout_and_activity(self):
         windows.idle_stop_seconds = 30
         windows._owned_windows[4321] = "1:(no workspace)"
         windows._last_activity = time.monotonic()
-        with mock.patch.object(windows, "IDLE_CHECK_INTERVAL", 0.01), \
-                mock.patch.object(windows, "_terminate_pid", side_effect=AssertionError("must not stop")):
-            task = asyncio.create_task(windows._idle_loop())
-            await asyncio.sleep(0.05)
-            task.cancel()
-            with self.assertRaises(asyncio.CancelledError):
-                await task
+        self.assertFalse(windows._should_stop_idle())
+        self.assertTrue(windows._should_stop_idle(now=windows._last_activity + 31))
+
+    def test_should_stop_idle_is_off_when_disabled_or_unowned(self):
+        windows.idle_stop_seconds = 0
+        windows._owned_windows[4321] = "1:(no workspace)"
+        self.assertFalse(windows._should_stop_idle(now=time.monotonic() + 10_000))
+        windows.idle_stop_seconds = 30
+        windows._owned_windows.clear()
+        self.assertFalse(windows._should_stop_idle(now=time.monotonic() + 10_000))
+
+    def test_stop_owned_windows_terminates_tracked_pids(self):
+        windows.idle_stop_seconds = 30
+        windows._owned_windows[4321] = "1:(no workspace)"
+        windows._save_state()
+        seen = []
+        with mock.patch.object(windows, "_terminate_pid", lambda pid, wait=8.0: seen.append(pid) or True):
+            stopped = windows.stop_owned_windows_now()
+        self.assertEqual(stopped, [4321])
+        self.assertEqual(seen, [4321])
+        self.assertEqual(windows.owned_windows(), {})
+        self.assertEqual(json.loads(self.state.read_text()), {"pids": []})
+
+    def test_failed_terminate_keeps_the_pid_tracked(self):
+        windows._owned_windows[4321] = "1:(no workspace)"
+        with mock.patch.object(windows, "_terminate_pid", return_value=False):
+            stopped = windows.stop_owned_windows_now()
+        self.assertEqual(stopped, [])
         self.assertIn(4321, windows.owned_windows())
 
-    async def test_watchdog_is_started_only_when_enabled(self):
-        windows.idle_stop_seconds = 0
-        windows._remember_owned(WINDOW)
-        self.assertIsNone(windows._idle_task)
-
-        windows.idle_stop_seconds = 60
-        windows._remember_owned(WINDOW)
-        self.assertIsNotNone(windows._idle_task)
-        windows._idle_task.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await windows._idle_task
-
-    async def test_exit_hook_stops_owned_windows(self):
+    def test_watchdog_thread_starts_only_when_usable(self):
+        windows.idle_stop_seconds = 600
         windows._owned_windows[4321] = "1:(no workspace)"
+        windows._start_idle_thread()
+        self.assertIsNotNone(windows._idle_thread)
+        self.assertTrue(windows._idle_thread.is_alive())
+        self.assertTrue(windows._idle_thread.daemon)
+        first = windows._idle_thread
+        windows._start_idle_thread()
+        self.assertIs(windows._idle_thread, first)  # one thread, not one per window
+
+        windows._idle_thread = None
+        windows.idle_stop_seconds = 0
+        windows._start_idle_thread()
+        self.assertIsNone(windows._idle_thread)
+
+    def test_adopt_previous_windows_takes_over_matching_processes(self):
+        windows.idle_stop_seconds = 30
+        self.state.write_text(json.dumps({"pids": [
+            {"pid": 4321, "label": "1:(no workspace)"},
+            {"pid": 9876, "label": "2:(no workspace)"},
+        ]}))
+        with mock.patch.object(windows, "_looks_like_our_recaf", side_effect=lambda pid: pid == 4321):
+            adopted = windows.adopt_previous_windows()
+        self.assertEqual(adopted, [4321])
+        self.assertEqual(windows.owned_windows(), {4321: "1:(no workspace)"})
+        saved = json.loads(self.state.read_text())
+        self.assertEqual([entry["pid"] for entry in saved["pids"]], [4321])
+
+    def test_looks_like_our_recaf_checks_the_command_line(self):
+        windows.configure_launch(plugins="/opt/recaf/plugins")
+        self.addCleanup(windows.configure_launch, None, None, None, None, None, [], None, None, None, None)
+        ours = ["/usr/bin/java", "-jar", "/opt/recaf/recaf.jar", "--headless", "--idle",
+                "-r", "/opt/recaf/plugins"]
+        gui = ["/usr/bin/java", "-jar", "/opt/recaf/recaf.jar"]
+        foreign = ["/usr/bin/java", "-jar", "/opt/recaf/recaf.jar", "--headless", "--idle",
+                   "-r", "/somewhere/else"]
+        with mock.patch.object(windows, "_proc_command_line", return_value=ours):
+            self.assertTrue(windows._looks_like_our_recaf(1))
+        with mock.patch.object(windows, "_proc_command_line", return_value=gui):
+            self.assertFalse(windows._looks_like_our_recaf(2))
+        with mock.patch.object(windows, "_proc_command_line", return_value=foreign):
+            self.assertFalse(windows._looks_like_our_recaf(3))
+
+    def test_exit_hook_stops_owned_windows_and_clears_state(self):
+        windows._owned_windows[4321] = "1:(no workspace)"
+        windows._save_state()
         terminated = []
         with mock.patch.object(windows, "_terminate_pid",
                                lambda pid, wait=8.0: terminated.append(pid) or True):
             windows._stop_owned_on_exit()
         self.assertEqual(terminated, [4321])
         self.assertEqual(windows.owned_windows(), {})
+        self.assertFalse(self.state.exists())
 
 
 if __name__ == "__main__":

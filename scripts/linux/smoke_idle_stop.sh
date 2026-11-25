@@ -7,7 +7,9 @@
 #   2. call a tool -> Recaf is started on demand
 #   3. stay quiet past the timeout -> that Recaf is stopped, Python keeps running
 #   4. call again -> a fresh Recaf is started
-#   5. stop the MCP server -> its Recaf does not survive it
+#   5. kill the server hard -> its Recaf is orphaned (the case a host reload leaves)
+#   6. start a new server -> it adopts the orphan and recycles it while idle
+#   7. stop the server -> nothing is left behind
 #
 #   ./scripts/linux/smoke_idle_stop.sh
 #
@@ -65,6 +67,7 @@ python_bin="$(resolve_python)" || die "python3 not found; run scripts/linux/inst
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/recaf-mcp-idle.XXXXXX")"
 mcp_log="$work_dir/mcp.log"
+state_file="$work_dir/owned.json"
 mcp_pid=""
 
 cleanup() {
@@ -115,6 +118,33 @@ asyncio.run(main())
 PY
 }
 
+start_server() {
+  RECAF_MCP_PORT="$port" RECAF_MCP_HOST=127.0.0.1 RECAF_MCP_STATE_FILE="$state_file" \
+    "$python_bin" \
+    "$REPO_ROOT/recaf_mcp_server.py" --http --port "$mcp_port" --recaf-port "$port" \
+    --headless --auto-start-recaf --auto-start-wait "$startup_wait" --recaf-idle-stop "$idle" \
+    --recaf-jar "$jar" --recaf-plugins-dir "$plugin_dir" --java "$java" \
+    --recaf-data-dir "$work_dir/data" --recaf-launch-log "$work_dir/recaf-launch.log" \
+    >> "$mcp_log" 2>&1 < /dev/null &
+  mcp_pid=$!
+  for _ in $(seq 1 $((timeout * 2))); do
+    http_answers "http://127.0.0.1:$mcp_port/mcp" && break
+    sleep 0.5
+  done
+  http_answers "http://127.0.0.1:$mcp_port/mcp" || { tail_log "$mcp_log" 40; die "MCP server did not start"; }
+  log "MCP server is up (pid $mcp_pid)"
+}
+
+wait_for_exit() {
+  local pid="$1" limit="$2" waited=0
+  while (( waited < limit )); do
+    proc_running "$pid" || return 0
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
 log "java:       $java"
 log "recaf.jar:  $jar"
 log "plugin dir: $plugin_dir"
@@ -124,21 +154,7 @@ if plugin_health_ok 127.0.0.1 "$port"; then
   die "something already answers on port $port; stop it or pick another --port"
 fi
 
-log "starting the MCP server (idle stop after ${idle}s)"
-RECAF_MCP_PORT="$port" RECAF_MCP_HOST=127.0.0.1 "$python_bin" \
-  "$REPO_ROOT/recaf_mcp_server.py" --http --port "$mcp_port" --recaf-port "$port" \
-  --headless --auto-start-recaf --auto-start-wait "$startup_wait" --recaf-idle-stop "$idle" \
-  --recaf-jar "$jar" --recaf-plugins-dir "$plugin_dir" --java "$java" \
-  --recaf-data-dir "$work_dir/data" --recaf-launch-log "$work_dir/recaf-launch.log" \
-  >> "$mcp_log" 2>&1 < /dev/null &
-mcp_pid=$!
-
-for _ in $(seq 1 $((timeout * 2))); do
-  http_answers "http://127.0.0.1:$mcp_port/mcp" && break
-  sleep 0.5
-done
-http_answers "http://127.0.0.1:$mcp_port/mcp" || { tail_log "$mcp_log" 40; die "MCP server did not start"; }
-log "MCP server is up (pid $mcp_pid)"
+start_server
 
 echo
 echo "== 1. a tool call starts Recaf on demand"
@@ -153,9 +169,7 @@ waited=0
 while (( waited < idle + 12 )); do
   sleep 2
   waited=$((waited + 2))
-  if [[ -n "$first_pid" ]] && ! proc_running "$first_pid"; then
-    break
-  fi
+  if ! proc_running "$first_pid"; then break; fi
 done
 if proc_running "$first_pid"; then
   tail_log "$mcp_log" 40
@@ -175,20 +189,43 @@ second_pid="$(instance_pid)"
 log "Recaf restarted on demand: pid $second_pid"
 
 echo
-echo "== 4. stopping the MCP server must not leave its Recaf behind"
-kill -TERM "$mcp_pid"
-waited=0
-while (( waited < 15 )); do
-  proc_running "$second_pid" || break
-  sleep 1
-  waited=$((waited + 1))
-done
-if proc_running "$second_pid"; then
+echo "== 4. a hard server crash leaves the Recaf behind"
+kill -KILL "$mcp_pid" 2>/dev/null || true
+wait "$mcp_pid" 2>/dev/null || true
+mcp_pid=""
+sleep 2
+proc_running "$second_pid" || die "expected the orphaned Recaf to survive a SIGKILLed server"
+log "orphan confirmed: Recaf pid $second_pid survived the killed server"
+
+echo
+echo "== 5. the next server adopts the orphan and recycles it"
+start_server
+grep -q "adopted Recaf pid $second_pid" "$mcp_log" \
+  || warn "no adoption line in the log (maybe it was noticed later); continuing"
+if ! wait_for_exit "$second_pid" $((idle + 20)); then
   tail_log "$mcp_log" 40
-  die "Recaf pid $second_pid survived the MCP server"
+  die "the adopted Recaf pid $second_pid was not recycled"
+fi
+log "adopted Recaf pid $second_pid recycled after the idle timeout"
+pid_alive "$mcp_pid" || die "the second MCP server exited unexpectedly"
+log "second MCP server still running (pid $mcp_pid)"
+
+echo
+echo "== 6. stopping the server leaves nothing behind"
+kill -TERM "$mcp_pid"
+if ! wait_for_exit "$mcp_pid" 15; then
+  kill -KILL "$mcp_pid" 2>/dev/null || true
 fi
 mcp_pid=""
-log "Recaf pid $second_pid stopped together with the MCP server"
+plugin_health_ok 127.0.0.1 "$port" && die "a Recaf is still answering on $port"
+if [[ -f "$state_file" ]]; then
+  python3 - "$state_file" <<'PY'
+import json, sys
+entries = json.load(open(sys.argv[1])).get("pids") or []
+raise SystemExit(0 if not entries else "state file still lists pids: %s" % entries)
+PY
+fi
+log "no Recaf and no ownership state left"
 
 echo
 log "PASS: only the Python side stays resident; Recaf exists only while it is used"

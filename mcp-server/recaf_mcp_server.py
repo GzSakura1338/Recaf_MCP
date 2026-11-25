@@ -1054,6 +1054,10 @@ def main():
             args.recaf_port,
         )
 
+    adopted = windows.adopt_previous_windows()
+    if adopted:
+        logger.info("Adopted %d Recaf process(es) left running by a previous server instance: %s",
+                    len(adopted), adopted)
     if auto_start:
         logger.info("Auto-start is on: a tool call with no Recaf window will start one "
                     "(headless when there is no display).")
