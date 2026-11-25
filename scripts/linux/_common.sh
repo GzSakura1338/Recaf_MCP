@@ -108,6 +108,18 @@ plugin_health_ok() {
   [[ "$(curl -s -m 3 "http://$1:$2/health" 2>/dev/null || true)" == "ok" ]]
 }
 
+# Print the first port in [base, base+20) that answers as a Recaf MCP plugin.
+find_running_plugin() {
+  local host="$1" base="$2" port
+  for (( port = base; port < base + 20; port++ )); do
+    if plugin_health_ok "$host" "$port"; then
+      printf '%s\n' "$port"
+      return 0
+    fi
+  done
+  return 1
+}
+
 wait_plugin_health() {
   local host="$1" port="$2" timeout="$3" waited=0
   while (( waited < timeout )); do

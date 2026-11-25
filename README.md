@@ -48,6 +48,8 @@ Python MCP server  ──HTTP──▶  Recaf plugin (inside the Recaf process)
 | 70 tools | workspace, classes, methods, search, xrefs, renames, decompilers, inheritance, resources, export, bytecode editing |
 | Native headless | `recaf --headless --idle`, no `DISPLAY`; UI-bound tools degrade cleanly |
 | Auto-start | the MCP server starts a headless Recaf when no window is running (`--auto-start-recaf`) |
+| Idle recycling | only Python stays resident: a Recaf this server started is stopped after N idle seconds (`--recaf-idle-stop`) and started again on the next call |
+| Single instance | one Recaf at a time by default on Linux: `open_recaf_window` refuses a second one (`--multi-recaf` lifts that) |
 | Multiple windows | one server drives several Recaf processes, addressed as `<number>:<jar name>` |
 | Three entry points | stdio (host-owned), streamable HTTP (long-running service), ready-made DSH bundle |
 | Scripts for both platforms | Windows PowerShell and Linux bash: start, stop, status, install, self test |
@@ -156,7 +158,7 @@ extra while Recaf boots and imports the jar.
 
 | Group | Count | Tools |
 |---|---|---|
-| Windows | 3 | `list_recaf_windows` `switch_recaf_window` `open_recaf_window` |
+| Windows | 3 | `list_recaf_windows` (reports `single_recaf`) `switch_recaf_window` `open_recaf_window` (refused in single mode) |
 | Workspace | 7 | `get_workspace_info` `open_workspace` `close_workspace` `add_supporting_resource` `list_supporting_resources` `fetch_current_class` `get_selected_text` |
 | Classes | 9 | `get_all_classes` `get_class_info` `get_class_source` `get_bytecode_of_class` `get_methods_of_class` `get_fields_of_class` `get_inner_classes` `get_annotations_of_class` `get_raw_class_bytes` |
 | Methods | 3 | `get_method_by_name` `get_method_bytecode` `get_method_info` |
@@ -187,12 +189,29 @@ With no display, everything runs on Recaf's native headless mode:
   `ui_available: false` with a reason instead of failing, and every other tool works normally
 - `--auto-start-recaf`: when a tool call finds no window at all, the server starts one
   (headless when there is no display), waits for `/health`, then runs the call. A failed attempt
-  is not retried for 60 s, and the process stays up for later sessions
+  is not retried for 60 s
+- `--recaf-idle-stop N`: that process is stopped after N seconds without a Recaf tool call, and
+  when the server exits, so **only the Python process stays resident**; the next call starts a
+  fresh Recaf (a few seconds). Only processes started by this server are touched — a Recaf you
+  launched yourself (GUI or scripts) is never stopped
 
 Option tables, systemd units, Dockerfile, ports and troubleshooting:
 **[docs/linux-headless.md](docs/linux-headless.md)** (Chinese; the commands are language-neutral).
 
-## Multiple Recaf windows
+## Single instance and multiple windows
+
+**Linux runs one Recaf at a time by default**: with a window already up, `open_recaf_window`
+returns an error (reuse it or stop it), and auto-start only ever fires when nothing is running.
+A second JVM only costs a few hundred MB of heap. Opt out when you really need several:
+
+```bash
+python recaf_mcp_server.py --http --multi-recaf   # or RECAF_SINGLE=0
+```
+
+`scripts/linux/start_recaf_headless.sh` follows the same rule: if a plugin already answers on
+ports 8750–8769 it refuses to start another Recaf.
+
+Outside single mode (or with `--multi-recaf`) the multi-window model below still applies:
 
 Several Recaf processes can run at once (GUI or headless); each loads the plugin and binds the
 first free port from `8750`.
@@ -222,6 +241,8 @@ jar name. A stale reference is rejected instead of editing the wrong jar.
 | `--java` / `--java-args` | `$RECAF_JAVA` / `$RECAF_JAVA_ARGS` | Java binary and extra JVM flags |
 | `--auto-start-recaf` | off | Start Recaf when no window exists (`--no-auto-start-recaf` forces it off) |
 | `--auto-start-wait` | `90` | Seconds to wait for the plugin of an auto-started Recaf |
+| `--single-recaf` / `--multi-recaf` | single on Linux | Whether several Recaf instances may run; Linux defaults to one |
+| `--recaf-idle-stop` | `0` (never) | Stop Recaf processes this server started after N seconds without a Recaf tool call; `0` keeps them |
 | `--recaf-launch-log` | `$RECAF_LAUNCH_LOG` | Append new-process output to a file (handy for headless debugging) |
 
 ### Environment variables
@@ -234,6 +255,8 @@ jar name. A stale reference is rejected instead of editing the wrong jar.
 | `RECAF_MCP_HOST` / `RECAF_MCP_PORT` | plugin's own listen address / base port (read by the plugin) |
 | `RECAF_HOST` / `RECAF_PORT` | plugin address / base port as seen by the MCP server |
 | `RECAF_HEADLESS`, `RECAF_AUTO_START`, `RECAF_AUTO_START_WAIT` | headless and auto-start switches |
+| `RECAF_IDLE_STOP` | idle-stop seconds (same as `--recaf-idle-stop`) |
+| `RECAF_SINGLE` | `1`/`0` overrides the single-instance default |
 | `RECAF_MCP_HTTP_HOST` / `RECAF_MCP_HTTP_PORT` | MCP listen address / port used by the Linux scripts |
 
 ### Ports
@@ -258,6 +281,7 @@ curl http://127.0.0.1:8750/instance    # pid / port / workspace / headless flag
 | `./test.sh --headless` | also runs the headless end-to-end smoke test |
 | `./scripts/linux/smoke_test.sh --with-mcp` | throw-away headless Recaf: `/health`, `/instance`, open a jar, decompile, headless degradation, then calls tools through an MCP client |
 | `./scripts/linux/smoke_autostart.sh` | zero windows → first tool call starts Recaf and opens a workspace |
+| `./scripts/linux/smoke_idle_stop.sh` | Python only: on-demand start, idle recycling, restart on the next call, cleanup on exit |
 | `.venv/bin/python scripts/mcp_tool_matrix.py --jar <jar>` | **full matrix**: stdio server, every one of the 70 tools (110 calls), one PASS/FAIL line each |
 
 Example matrix run (`Nyx.jar`, a 75 MB Fabric mod):

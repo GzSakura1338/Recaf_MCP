@@ -104,6 +104,16 @@ start_recaf() {
     die "input workspace not found: $input"
   fi
 
+  # Linux runs one Recaf at a time: a second instance only costs memory, and the
+  # MCP server refuses to start one too (unless it runs with --multi-recaf).
+  local running_port
+  if running_port="$(find_running_plugin "$service_host" 8750)" \
+     || running_port="$(find_running_plugin "$service_host" "$port")"; then
+    die "a Recaf MCP plugin already answers on $service_host:$running_port.
+This host is meant to run a single Recaf; stop it first:
+  ./scripts/linux/start_recaf_headless.sh stop"
+  fi
+
   local local_pid=""
   if local_pid="$(read_pid "$HEADLESS_PID")" && pid_alive "$local_pid"; then
     log "headless Recaf already running (pid $local_pid)"

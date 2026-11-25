@@ -268,8 +268,11 @@ async def exercise(m: Matrix, jar: Path, work: Path, export_dir: Path, compiled:
     # ---- windows ---------------------------------------------------------
     m.heading("windows")
     windows = await m.ok("list_recaf_windows", check=lambda p: (
-        bool(p.get("windows")) or bool(p.get("auto_start")), f"{len(p.get('windows') or [])} window(s)"))
-    label = (windows.get("windows") or [{}])[0].get("label") if isinstance(windows, dict) else None
+        bool(p.get("windows")) or bool(p.get("auto_start")),
+        f"{len(p.get('windows') or [])} window(s), single={p.get('single_recaf')}"))
+    single_mode = bool(windows.get("single_recaf")) if isinstance(windows, dict) else False
+    # Address the window by number so the switch works before a jar is open.
+    label = str((windows.get("windows") or [{}])[0].get("window")) if isinstance(windows, dict) else None
     if label:
         await m.ok("switch_recaf_window", {"window": label}, check=lambda p: (bool(p.get("active")), str(p.get("active"))))
 
@@ -533,14 +536,21 @@ async def exercise(m: Matrix, jar: Path, work: Path, export_dir: Path, compiled:
     m.heading("extra window")
     before = await m.call("list_recaf_windows")
     windows_before = (before[1] or {}).get("windows") or [] if isinstance(before[1], dict) else []
-    await m.ok("open_recaf_window", {"jar_path": "", "wait_seconds": 120}, timeout=300,
-               check=lambda p: (bool(p.get("opened")), f"window {p.get('opened', {}).get('label')} "
-                                                      f"headless={p.get('opened', {}).get('headless')}"))
-    await m.ok("list_recaf_windows", check=lambda p: (len(p.get("windows") or []) == len(windows_before) + 1,
-                                                      f"{len(p.get('windows') or [])} window(s)"))
-    if windows_before:
-        await m.ok("switch_recaf_window", {"window": windows_before[0]["label"]},
-                   check=lambda p: (bool(p.get("active")), p.get("active")))
+    if single_mode:
+        # Linux default: a second instance is refused, the running one stays.
+        await m.fails("open_recaf_window", {"jar_path": "", "wait_seconds": 5}, contains="single-recaf")
+        await m.ok("list_recaf_windows",
+                   check=lambda p: (len(p.get("windows") or []) == len(windows_before),
+                                    f"{len(p.get('windows') or [])} window(s) (refused to add another)"))
+    else:
+        await m.ok("open_recaf_window", {"jar_path": "", "wait_seconds": 120}, timeout=300,
+                   check=lambda p: (bool(p.get("opened")), f"window {p.get('opened', {}).get('label')} "
+                                                          f"headless={p.get('opened', {}).get('headless')}"))
+        await m.ok("list_recaf_windows", check=lambda p: (len(p.get("windows") or []) == len(windows_before) + 1,
+                                                          f"{len(p.get('windows') or [])} window(s)"))
+        if windows_before:
+            await m.ok("switch_recaf_window", {"window": windows_before[0]["label"]},
+                       check=lambda p: (bool(p.get("active")), p.get("active")))
 
     # ---- leave a clean state --------------------------------------------
     m.heading("cleanup")

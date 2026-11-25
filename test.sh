@@ -47,7 +47,7 @@ done
 "$python_bin" -m py_compile scripts/linux/smoke_mcp.py
 echo "  ok: scripts/linux/*.sh"
 
-echo "[4/5] Python unit tests (headless launch plumbing)"
+echo "[4/5] Python unit tests (launch, idle recycling, single instance)"
 "$python_bin" -m unittest discover -s mcp-server/tests 2>&1 | tail -3
 
 echo "[5/5] Done"

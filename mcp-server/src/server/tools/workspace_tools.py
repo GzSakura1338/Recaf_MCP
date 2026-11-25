@@ -20,6 +20,9 @@ async def open_recaf_window(jar_path: str = "", wait_seconds: int = 60) -> dict:
     opened in the new window as soon as it is up. The default window chosen
     with switch_recaf_window is left unchanged.
 
+    In single-Recaf mode (the Linux default) this fails when a window is already
+    running; reuse that window or stop it, or start the server with --multi-recaf.
+
     MCP Tool: open_recaf_window
     """
     if jar_path and not os.path.exists(jar_path):

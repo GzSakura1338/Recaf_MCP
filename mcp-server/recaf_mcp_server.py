@@ -28,6 +28,13 @@ An MCP host can also let this server start Recaf itself: with --auto-start-recaf
 (or RECAF_AUTO_START=1) the first tool call that finds no window launches one
 ("--headless --idle" when there is no display) and then runs. That is how DSH
 brings the whole chain up from a single stdio MCP entry.
+
+With --recaf-idle-stop N (or RECAF_IDLE_STOP=N) those processes are stopped again
+after N seconds without a Recaf tool call, and when this server exits, so a host
+session only keeps the Python process resident.
+
+On Linux at most one Recaf runs at a time (--multi-recaf lifts that): a second
+instance only costs memory, and open_recaf_window reports an error instead.
 """
 
 import argparse
@@ -36,6 +43,7 @@ import inspect
 import logging
 import os
 import shlex
+import signal
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -55,7 +63,9 @@ INSTRUCTIONS = (
     "workspace act only on the selected window. "
     "A window can run headless (Recaf started with --headless, e.g. on Linux without a display): "
     "it has no editor UI, so fetch_current_class and get_selected_text answer with "
-    "ui_available=false; pass class names explicitly to the other tools there."
+    "ui_available=false; pass class names explicitly to the other tools there. "
+    "When the server runs with an idle timeout, Recaf processes it started are stopped again after "
+    "that many idle seconds; the next tool call starts a fresh one."
 )
 
 mcp = FastMCP("Recaf MCP Plugin Reverse Engineering Server", instructions=INSTRUCTIONS)
@@ -145,6 +155,10 @@ async def open_recaf_window(jar_path: str = "", wait_seconds: int = 60) -> dict:
 
     Returns the new window as '<number>:<jar name>'; pass that as `window` to the other tools.
     The default window is not changed. Waits up to `wait_seconds` for Recaf to finish loading.
+
+    On Linux the server runs in single-Recaf mode by default: with a window already running
+    this returns an error instead of spawning a second instance (start the server with
+    --multi-recaf to allow several).
     """
     return await tools.workspace_tools.open_recaf_window(jar_path, wait_seconds)
 
@@ -805,6 +819,27 @@ async def save_workspace(output_path: str) -> dict:
 # Entrypoint
 # =============================================================================
 
+def _install_shutdown_hooks() -> None:
+    """Stop Recaf processes this server started when it is asked to terminate."""
+
+    def handler(signum, _frame):
+        try:
+            windows.stop_owned_windows_now()
+        finally:
+            # Re-raise with the default action so the exit status stays truthful.
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+
+    for name in ("SIGTERM", "SIGINT", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, handler)
+        except (ValueError, OSError):  # not the main thread, or unsupported signal
+            continue
+
+
 def _env_bool(name: str):
     """Read a boolean-ish environment variable, or None when unset/blank."""
     value = os.environ.get(name, "").strip().lower()
@@ -942,7 +977,31 @@ def main():
         default=None,
         type=int,
     )
+    parser.add_argument(
+        "--single-recaf",
+        help="Run at most one Recaf at a time: open_recaf_window refuses to start a second "
+             "instance. Default: on for Linux, off elsewhere; $RECAF_SINGLE overrides.",
+        dest="single_recaf",
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--multi-recaf",
+        help="Allow several Recaf instances again (Linux default is single).",
+        dest="single_recaf",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--recaf-idle-stop",
+        help="Stop the Recaf processes this server started after N seconds without a Recaf tool "
+             "call, so only the Python side stays resident (0 = keep them, default). "
+             "Default: $RECAF_IDLE_STOP. Only processes started here are stopped.",
+        default=None,
+        type=int,
+    )
     args = parser.parse_args()
+
+    _install_shutdown_hooks()
 
     auto_start = args.auto_start
     if auto_start is None:
@@ -950,6 +1009,12 @@ def main():
     auto_wait = args.auto_start_wait
     if auto_wait is None:
         auto_wait = int(os.environ.get("RECAF_AUTO_START_WAIT") or 90)
+    idle_stop = args.recaf_idle_stop
+    if idle_stop is None:
+        idle_stop = int(os.environ.get("RECAF_IDLE_STOP") or 0)
+    single = args.single_recaf
+    if single is None:
+        single = _env_bool("RECAF_SINGLE")
 
     config.set_recaf_host(args.recaf_host)
     config.set_recaf_port(args.recaf_port)
@@ -966,6 +1031,8 @@ def main():
         log=args.recaf_launch_log or os.environ.get("RECAF_LAUNCH_LOG") or None,
         auto=auto_start,
         auto_wait=auto_wait,
+        idle_stop=idle_stop,
+        single=single,
     )
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
@@ -990,6 +1057,12 @@ def main():
     if auto_start:
         logger.info("Auto-start is on: a tool call with no Recaf window will start one "
                     "(headless when there is no display).")
+    if idle_stop > 0:
+        logger.info("Recaf processes started by this server stop after %ss without a tool call; "
+                    "only this Python process stays resident.", idle_stop)
+    if windows.single_mode():
+        logger.info("Single-Recaf mode: open_recaf_window will not start a second instance "
+                    "(pass --multi-recaf to allow it).")
     logger.info("Looking for Recaf windows...")
     result = config.health_ping()
     logger.info("Health check result: %s", result)

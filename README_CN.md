@@ -45,6 +45,8 @@ Python MCP 服务  ──HTTP──▶  Recaf 插件（运行在 Recaf 进程内
 | 70 个工具 | 工作区、类、方法、搜索、xref、重命名、反编译、继承、资源、导出、字节码编辑 |
 | 原生无头 | `recaf --headless --idle`，无需 DISPLAY；无头下 UI 相关工具优雅降级 |
 | 自动拉起 | MCP 服务发现没有窗口时自己启动无头 Recaf（`--auto-start-recaf`） |
+| 空闲回收 | 只保留 Python 常驻：Recaf 用完空闲 N 秒后自动关掉（`--recaf-idle-stop`），下次调用再拉起 |
+| 单实例 | Linux 默认只跑一个 Recaf，`open_recaf_window` 不会开第二个（`--multi-recaf` 解除） |
 | 多窗口 | 一个服务管理多个 Recaf 进程，`<编号>:<jar 名>` 定位，不会改错 jar |
 | 三种接入 | stdio（宿主拉起）/ streamable HTTP（常驻服务）/ 现成的 DSH bundle |
 | 双平台脚本 | Windows PowerShell 与 Linux bash 对等：启动、停止、状态、安装、自检 |
@@ -152,7 +154,7 @@ dsh plugin install "/path/to/Recaf_MCP/contrib/dsh-bundle"
 
 | 分组 | 数量 | 工具 |
 |---|---|---|
-| 窗口 | 3 | `list_recaf_windows` `switch_recaf_window` `open_recaf_window` |
+| 窗口 | 3 | `list_recaf_windows`（返回 `single_recaf` 标记）`switch_recaf_window` `open_recaf_window`（单实例下拒绝第二个） |
 | 工作区 | 7 | `get_workspace_info` `open_workspace` `close_workspace` `add_supporting_resource` `list_supporting_resources` `fetch_current_class` `get_selected_text` |
 | 类 | 9 | `get_all_classes` `get_class_info` `get_class_source` `get_bytecode_of_class` `get_methods_of_class` `get_fields_of_class` `get_inner_classes` `get_annotations_of_class` `get_raw_class_bytes` |
 | 方法 | 3 | `get_method_by_name` `get_method_bytecode` `get_method_info` |
@@ -182,12 +184,27 @@ Linux 上没有显示设备时，一切都走 Recaf 原生无头模式：
 - `fetch_current_class` / `get_selected_text` 依赖编辑器界面，无头下返回
   `ui_available: false` 和说明而不是报错；其余工具全部可用
 - `--auto-start-recaf`：任一工具调用发现没有任何窗口时，自动拉起一个（无显示时自动用无头），
-  失败后 60 秒内不重试，拉起的进程常驻供后续会话复用
+  失败后 60 秒内不重试
+- `--recaf-idle-stop N`：本服务拉起的 Recaf 在 N 秒没有 Recaf 工具调用后停止，服务退出时也一并停止，
+  所以**常驻的只有 Python 进程**；下次调用会重新拉起（几秒）。只回收本服务启动的进程，
+  你自己用脚本/GUI 开的 Recaf 不会被碰
 
 细节（参数表、systemd 单元、Dockerfile、端口、排错）见
 **[docs/linux-headless.md](docs/linux-headless.md)**。
 
-## 多窗口
+## 单实例与多窗口
+
+**Linux 默认单实例**：一个 MCP 服务最多跑一个 Recaf。已经有窗口时：
+`open_recaf_window` 直接返回错误（提示复用或先停止），自动拉起也只在零窗口时发生。
+一个窗口还要占几百 MB 堆内存，多开没有收益。真的需要多实例时：
+
+```bash
+python recaf_mcp_server.py --http --multi-recaf   # 或 RECAF_SINGLE=0
+```
+
+`scripts/linux/start_recaf_headless.sh` 也按单实例设计：检测到 8750–8769 已有插件在应答就拒绝启动。
+
+非单实例模式（或 `--multi-recaf`）下仍是多窗口模型：
 
 可以同时跑多个 Recaf 进程（GUI 或无头），每个都加载插件并从 `8750` 起绑定第一个空闲端口。
 
@@ -216,6 +233,8 @@ Linux 上没有显示设备时，一切都走 Recaf 原生无头模式：
 | `--java` / `--java-args` | `$RECAF_JAVA` / `$RECAF_JAVA_ARGS` | java 路径与额外 JVM 参数 |
 | `--auto-start-recaf` | 关 | 没有窗口时自动拉起（`--no-auto-start-recaf` 可强制关闭） |
 | `--auto-start-wait` | `90` | 自动拉起时等插件就绪的秒数 |
+| `--single-recaf` / `--multi-recaf` | Linux 单实例 | 是否允许同时多个 Recaf；默认 Linux 单实例 |
+| `--recaf-idle-stop` | `0`（不回收） | 本服务启动的 Recaf 空闲这么多秒后停止，只留 Python 常驻；`0` 表示一直保留 |
 | `--recaf-launch-log` | `$RECAF_LAUNCH_LOG` | 把新进程输出追加到文件（调试无头启动很有用） |
 
 ### 环境变量
@@ -228,6 +247,8 @@ Linux 上没有显示设备时，一切都走 Recaf 原生无头模式：
 | `RECAF_MCP_HOST` / `RECAF_MCP_PORT` | 插件自身监听地址 / 起始端口（插件读取） |
 | `RECAF_HOST` / `RECAF_PORT` | MCP 服务看到的插件地址 / 起始端口 |
 | `RECAF_HEADLESS`、`RECAF_AUTO_START`、`RECAF_AUTO_START_WAIT` | 无头与自动拉起开关 |
+| `RECAF_IDLE_STOP` | 空闲回收秒数（等价 `--recaf-idle-stop`） |
+| `RECAF_SINGLE` | `1`/`0` 覆盖单实例默认值 |
 | `RECAF_MCP_HTTP_HOST` / `RECAF_MCP_HTTP_PORT` | Linux 脚本里 MCP 服务的监听地址 / 端口 |
 
 ### 端口
@@ -252,6 +273,7 @@ curl http://127.0.0.1:8750/instance    # pid / 端口 / 工作区 / headless 标
 | `./test.sh --headless` | 再加无头端到端冒烟 |
 | `./scripts/linux/smoke_test.sh --with-mcp` | 一次性无头 Recaf：`/health`、`/instance`、打开 jar、反编译、无头降级，并经 MCP 客户端调用工具 |
 | `./scripts/linux/smoke_autostart.sh` | 零窗口 → 首次工具调用自动拉起 Recaf 并打开工作区 |
+| `./scripts/linux/smoke_idle_stop.sh` | 只保留 Python：按需拉起、空闲回收、再次拉起、退出时清理 |
 | `.venv/bin/python scripts/mcp_tool_matrix.py --jar <jar>` | **全量矩阵**：stdio 起服务，逐个调用 70 个工具（110 次调用），逐行 PASS/FAIL |
 
 矩阵示例（`Nyx.jar`，75 MB Fabric mod）：

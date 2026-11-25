@@ -28,9 +28,11 @@ server entry point, `libs/recaf.jar`, `build/libs` (the plugin jar directory) an
 | `command` / `args[0]` | interpreter and `recaf_mcp_server.py` |
 | `--headless` | Recaf runs without a JavaFX UI (no X server needed) |
 | `--auto-start-recaf` | start Recaf on the first tool call when none is running |
+| `--single-recaf` | never start a second instance (Linux default anyway) |
 | `--recaf-jar` | the Recaf 4 release the plugin was built against |
 | `--recaf-plugins-dir` | directory holding `recaf-mcp-plugin-*.jar` |
 | `--java` | JDK 25 executable |
+| `--recaf-idle-stop 180` | stop the Recaf this server started after 3 idle minutes (only Python stays resident) |
 
 `startupTimeoutMs: 60000` covers the stdio probe plus tool sync;
 `toolCallTimeoutMs: 180000` covers the first call, which also boots Recaf and can
@@ -41,8 +43,12 @@ import a large jar.
 - Nothing is spawned until the agent actually calls a Recaf tool: the MCP server
   starts immediately (stdio), Recaf starts on the first tool call that needs a
   window.
-- The Recaf process is detached and keeps running after DSH exits, so the next
-  session (or another agent) reuses the same window.
+- With `--recaf-idle-stop 180` the Recaf process is stopped again after three
+  idle minutes, and when the MCP server exits, so a DSH session normally keeps
+  only the Python process resident. The next tool call starts a fresh Recaf
+  (a few seconds).
+- Raise or lower that value to trade latency for memory; `0` keeps Recaf running,
+  and a Recaf you started yourself is never touched.
 - One MCP server entry manages every Recaf window; `list_recaf_windows` /
   `switch_recaf_window` / `open_recaf_window` still apply.
 - Turning the bundle off removes the tools; Recaf may keep running until stopped

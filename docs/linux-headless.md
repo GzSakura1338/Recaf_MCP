@@ -184,6 +184,26 @@ MCP 客户端配置：
 - `list_recaf_windows` 在空列表时会返回 `auto_start: true` 和 `hint`，告诉模型"下一次调用会自动起一个"。
 - 环境变量等价物：`RECAF_AUTO_START=1`、`RECAF_AUTO_START_WAIT=90`。
 
+### 只保留 Python 常驻：空闲回收
+
+`--auto-start-recaf` 让 Recaf 按需启动，`--recaf-idle-stop N` 让它按需消失：
+
+```bash
+.venv/bin/python recaf_mcp_server.py --http --auto-start-recaf --recaf-idle-stop 180 ...
+```
+
+- 本服务启动的 Recaf 在 **N 秒没有 Recaf 工具调用**后自动停止；服务退出（SIGTERM/SIGINT/stdio 断开）时也一并停止
+- 只回收**本服务启动**的进程；你自己用 `start_recaf_headless.sh` 或 GUI 开的 Recaf 不受影响
+- 下次工具调用重新拉起（无头启动几秒 + 导入 jar 的时间），列表/切换窗口这类调用不会主动拉起
+- `N=0`（默认）表示一直保留，行为与之前一致
+- 环境变量等价物：`RECAF_IDLE_STOP=180`
+
+自检：
+
+```bash
+./scripts/linux/smoke_idle_stop.sh          # 按需拉起 → 空闲回收 → 再次拉起 → 退出清理
+```
+
 ### DSH
 
 本仓库带一个现成的配置型 bundle：[`contrib/dsh-bundle/`](../contrib/dsh-bundle/)，它往 DSH
@@ -258,11 +278,17 @@ CI 里只想验证链路时：
 
 ---
 
-## 8. 端口与多实例
+## 8. 端口与实例数
 
-- 每个 Recaf 进程从 `8750` 起绑定第一个空闲端口，跳过 `8751`（MCP 服务），最多到 `8769`。
-- 想并排跑多个无头 Recaf：给每个实例不同的 `--port`（期望端口）和 `--data-dir`，
-  再用 `MCP 服务 --recaf-port` 或 `list_recaf_windows` / `switch_recaf_window` 选择。
+**Linux 默认单实例**：一个 MCP 服务最多一个 Recaf。
+
+- 插件从 `8750` 起绑定第一个空闲端口，跳过 `8751`（MCP 服务），最多到 `8769`。
+- `open_recaf_window` 在已有窗口时返回错误（提示复用或先停止），不会开第二个；
+  `list_recaf_windows` 会带 `single_recaf: true`。
+- 启动脚本同样按单实例设计：`start_recaf_headless.sh` 检测到 8750–8769（或 `--port` 指定范围）
+  已有插件应答时直接拒绝启动，并提示先 `stop`。
+- 确实需要多实例时（比如并排分析多个 jar）：`--multi-recaf`（或 `RECAF_SINGLE=0`），
+  再给每个实例不同的 `--port` / `--data-dir`，用 `list_recaf_windows` / `switch_recaf_window` 选择。
 
 ---
 

@@ -13,12 +13,17 @@
           - /data/dsh/home/Recaf MCP/.agents/worktrees/linux-headless/recaf_mcp_server.py
           - --headless
           - --auto-start-recaf
+          - --single-recaf
           - --recaf-jar
           - /data/dsh/home/Recaf MCP/.agents/worktrees/linux-headless/libs/recaf.jar
           - --recaf-plugins-dir
           - /data/dsh/home/Recaf MCP/.agents/worktrees/linux-headless/build/libs
           - --java
           - /usr/local/bin/java
+          # Keep only the Python side resident: Recaf is started on demand and
+          # stopped again after 3 minutes without a Recaf tool call.
+          - --recaf-idle-stop
+          - '180'
         cwd: /data/dsh/home/Recaf MCP/.agents/worktrees/linux-headless
         startupTimeoutMs: 60000
         toolCallTimeoutMs: 180000

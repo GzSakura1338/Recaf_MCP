@@ -11,10 +11,12 @@ different jar after window 2 is closed.
 """
 
 import asyncio
+import atexit
 import contextvars
 import os
 import re
 import shlex
+import signal
 import shutil
 import subprocess
 import sys
@@ -51,8 +53,23 @@ auto_start: bool = False
 auto_start_wait: int = 90
 AUTO_START_RETRY_SECONDS = 60.0
 
+# Stop Recaf again after this many seconds without a Recaf tool call (0 = keep it
+# running). Only processes this server started are tracked, so a Recaf the user
+# launched (GUI or scripts/linux) is never touched. This is what keeps a host
+# session cheap: the Java side exists only while it is being used.
+idle_stop_seconds: float = 0.0
+IDLE_CHECK_INTERVAL = 5.0
+
+# One Recaf at a time on Linux: a second instance only costs memory, and the
+# headless host has no use for parallel windows. None = auto (single on Linux).
+single_recaf: Optional[bool] = None
+
 _auto_start_lock: Optional[asyncio.Lock] = None
 _auto_start_failed_at = 0.0
+_owned_windows: Dict[int, str] = {}
+_owned_procs: Dict[int, Any] = {}
+_last_activity = 0.0
+_idle_task: Optional[asyncio.Task] = None
 
 
 def _log(message: str) -> None:
@@ -99,10 +116,11 @@ def configure_launch(recaf_jar: Optional[str] = None, headless_mode: Optional[bo
                      plugins: Optional[str] = None, data: Optional[str] = None,
                      java: Optional[str] = None, java_args: Optional[List[str]] = None,
                      log: Optional[str] = None, auto: Optional[bool] = None,
-                     auto_wait: Optional[int] = None) -> None:
+                     auto_wait: Optional[int] = None, idle_stop: Optional[int] = None,
+                     single: Optional[bool] = None) -> None:
     """Configure how open_recaf_window (and auto-start) launches a Recaf process."""
     global launch_jar, headless, plugin_dir, data_dir, java_binary, extra_java_args, launch_log
-    global auto_start, auto_start_wait
+    global auto_start, auto_start_wait, idle_stop_seconds, single_recaf
     if recaf_jar is not None:
         launch_jar = recaf_jar
     if headless_mode is not None:
@@ -121,6 +139,17 @@ def configure_launch(recaf_jar: Optional[str] = None, headless_mode: Optional[bo
         auto_start = auto
     if auto_wait is not None:
         auto_start_wait = max(10, int(auto_wait))
+    if idle_stop is not None:
+        idle_stop_seconds = max(0.0, float(idle_stop))
+    if single is not None:
+        single_recaf = single
+
+
+def single_mode() -> bool:
+    """True when this server refuses to run a second Recaf (default on Linux)."""
+    if single_recaf is not None:
+        return single_recaf
+    return sys.platform.startswith("linux")
 
 
 def _headless_requested() -> bool:
@@ -135,6 +164,137 @@ def _headless_requested() -> bool:
 def invalidate() -> None:
     global _cache_time
     _cache_time = 0.0
+
+
+def _touch() -> None:
+    global _last_activity
+    _last_activity = time.monotonic()
+
+
+def owned_windows() -> Dict[int, str]:
+    """PIDs (and labels) of Recaf processes this server started and may stop."""
+    return dict(_owned_windows)
+
+
+def _remember_owned(window: Dict[str, Any], process: Any = None) -> None:
+    pid = window.get("pid")
+    if not pid:
+        return
+    label = window.get("label") or f"port {window.get('port')}"
+    _owned_windows[int(pid)] = label
+    if process is not None:
+        # Keep the handle so a stopped child can be reaped instead of lingering
+        # as a zombie for the rest of the session.
+        _owned_procs[int(pid)] = process
+    _touch()
+    if idle_stop_seconds > 0:
+        _log(f"started Recaf pid {pid} ({label}); it stops after {int(idle_stop_seconds)}s without tool calls")
+    _ensure_idle_watchdog()
+
+
+def _ensure_idle_watchdog() -> None:
+    """Start the idle watchdog once, inside a running event loop."""
+    global _idle_task
+    if idle_stop_seconds <= 0 or not _owned_windows:
+        return
+    if _idle_task is not None and not _idle_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _idle_task = loop.create_task(_idle_loop())
+
+
+async def _idle_loop() -> None:
+    global _idle_task
+    while True:
+        await asyncio.sleep(IDLE_CHECK_INTERVAL)
+        if not _owned_windows:
+            _idle_task = None
+            return
+        if idle_stop_seconds <= 0:
+            continue
+        if time.monotonic() - _last_activity < idle_stop_seconds:
+            continue
+        await stop_owned_windows()
+
+
+async def stop_owned_windows() -> List[int]:
+    """Stop every Recaf this server started (never the user's own windows)."""
+    stopped: List[int] = []
+    idle = int(max(0.0, time.monotonic() - _last_activity))
+    for pid, label in list(_owned_windows.items()):
+        if await asyncio.to_thread(_terminate_pid, pid):
+            _owned_windows.pop(pid, None)
+            _reap(pid)
+            stopped.append(pid)
+            _log(f"stopped Recaf pid {pid} ({label}) after {idle}s without tool calls")
+        else:
+            _log(f"could not stop Recaf pid {pid} ({label}); leaving it running")
+    if stopped:
+        invalidate()
+    return stopped
+
+
+def _reap(pid: int) -> None:
+    process = _owned_procs.pop(pid, None)
+    if process is not None:
+        try:
+            process.poll()
+        except Exception:  # noqa: BLE001 - reaping must never break shutdown
+            pass
+
+
+def stop_owned_windows_now() -> List[int]:
+    """Synchronous stop for signal/exit paths, where no event loop is available."""
+    stopped: List[int] = []
+    for pid, label in list(_owned_windows.items()):
+        _log(f"stopping Recaf pid {pid} ({label}): this MCP server is shutting down")
+        _terminate_pid(pid, wait=3.0)
+        _reap(pid)
+        _owned_windows.pop(pid, None)
+        stopped.append(pid)
+    if stopped:
+        invalidate()
+    return stopped
+
+
+def _terminate_pid(pid: int, wait: float = 8.0) -> bool:
+    """Ask one process to exit, then force it. True when it is gone or already was."""
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                           capture_output=True, timeout=20, check=False)
+            return True
+        except (OSError, subprocess.SubprocessError):
+            return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    end = time.monotonic() + wait
+    while time.monotonic() < end:
+        time.sleep(0.2)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except OSError:
+            return False
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        return False
+    return True
+
+
+@atexit.register
+def _stop_owned_on_exit() -> None:
+    """A stdio server owns its Recaf processes: do not leave Java behind."""
+    stop_owned_windows_now()
 
 
 def describe(window: Dict[str, Any], active: Optional[int] = None) -> Dict[str, Any]:
@@ -240,7 +400,9 @@ def _pick(spec: str, found: List[Dict[str, Any]]) -> Dict[str, Any]:
         window = _find(found, number)
         if window is None:
             raise WindowError(f"window {number} not found (closed, or never opened)", found)
-        if name and name.lower() not in (window.get("jar_name") or "").lower():
+        # Match the suffix against the label, not only the jar name: "1:(no workspace)"
+        # is a valid label that a caller may have just read from list_recaf_windows.
+        if name and name.lower() not in (window.get("label") or "").lower():
             raise WindowError(f"window {number} is now '{window['label']}', not '{name}'", found)
         return window
 
@@ -270,6 +432,7 @@ def _pick_default(found: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 async def resolve(spec: str = "") -> Dict[str, Any]:
     spec = (spec or "").strip()
+    _touch()
     try:
         return await _resolve_once(spec)
     except WindowError as e:
@@ -329,11 +492,13 @@ async def resolve_base() -> str:
 
 
 async def list_windows() -> Dict[str, Any]:
+    _touch()
     found = await _windows(refresh=True)
     current = _find(found, _active_window) if _active_window is not None else None
     result: Dict[str, Any] = {
         "windows": [describe(w, _active_window) for w in found],
         "active": current["label"] if current else None,
+        "single_recaf": single_mode(),
     }
     if not found and auto_start:
         # Listing should not spawn a JVM, but the model needs to know it can just call.
@@ -344,6 +509,7 @@ async def list_windows() -> Dict[str, Any]:
 
 
 async def switch(spec: str) -> Dict[str, Any]:
+    _touch()
     if not (spec or "").strip():
         raise WindowError("missing 'window'", await _windows(refresh=True))
     global _active_window
@@ -521,6 +687,13 @@ def _detached_kwargs() -> Dict[str, Any]:
 
 async def launch(wait_seconds: int = 60) -> Dict[str, Any]:
     before = {w["instance_id"] for w in await _windows(refresh=True)}
+    if single_mode() and before:
+        running = sorted(_cache, key=lambda w: w["window"])
+        labels = ", ".join(w["label"] for w in running)
+        raise WindowError(
+            f"single-Recaf mode: {labels} is already running; reuse it with window=... "
+            f"or stop it first (start the server with --multi-recaf to allow several)"
+        )
     command = await asyncio.to_thread(_launch_command, list(_cache))
     stdout = subprocess.DEVNULL
     stderr = subprocess.DEVNULL
@@ -547,6 +720,7 @@ async def launch(wait_seconds: int = 60) -> Dict[str, Any]:
         await asyncio.sleep(1.0)
         for window in await discover():
             if window["instance_id"] not in before:
+                _remember_owned(window, process)
                 return window
         if process.poll() is not None:
             raise WindowError(f"Recaf exited with code {process.returncode} before its plugin came up; "
