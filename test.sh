@@ -44,7 +44,8 @@ echo "[3/5] Checking Linux launcher scripts"
 for script in scripts/linux/*.sh test.sh; do
   bash -n "$script"
 done
-"$python_bin" -m py_compile scripts/linux/smoke_mcp.py
+"$python_bin" -m py_compile scripts/linux/smoke_mcp.py scripts/bench_python_overhead.py \
+    scripts/mcp_tool_matrix.py
 echo "  ok: scripts/linux/*.sh"
 
 echo "[4/5] Python unit tests (launch, idle recycling, single instance)"

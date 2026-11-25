@@ -217,6 +217,25 @@ python recaf_mcp_server.py --http --multi-recaf   # 或 RECAF_SINGLE=0
 其它工具都有可选参数 `window`：`"2"`、`"2:client.jar"`，或 jar 名里能唯一匹配的一段。
 编号后面带 jar 名时必须与实际一致，过期的引用会被拒绝，不会改错 jar。
 
+## 运行开销
+
+常驻时它只做一件事：等 MCP 请求。实测（8 核 ARM Linux，本机回环，`scripts/bench_python_overhead.py`）：
+
+| 指标 | 数值 | 原因 |
+|---|---|---|
+| 空闲 CPU | 0.0–0.3% | 看门狗不轮询：`threading.Event` 一直等到空闲期限 |
+| 常驻内存（RSS） | ~36 MB | 全程只用一个 HTTP 客户端，不再每次调用新建 |
+| 单次工具调用 CPU | ~0.8 ms | 修复前 30 ms（每次调用都新建 `httpx.AsyncClient`，光 TLS 上下文就 18 ms） |
+| 单次工具调用延迟 | ~0.8 ms | keep-alive 复用连接，不再每次握手 |
+| 每次调用的端口探测 | 0 次 | 解析结果缓存 30 s；连接失败时失效并重试 |
+
+做法：
+
+- 所有工具调用共用一个 keep-alive `httpx.AsyncClient`（按事件循环复用，换循环才重建）；端口探测也复用同一个客户端。
+- 窗口解析走乐观缓存：30 s 内复用上次的窗口列表、不扫端口；请求真的失败才 `invalidate()` 重试，所以不会用错窗口。
+- 空闲回收事件驱动：有调用就 `set()` 事件重算期限，没有调用就一次长等待；停止失败退避 30 s，不忙等。
+- 可复现：`python scripts/bench_python_overhead.py`（假插件只答 `/instance`、`/health`、`/class-info`，量每调用 CPU / 内存 / 连接数 / 空闲 CPU）。
+
 ## 配置参考
 
 ### MCP 服务命令行
@@ -324,7 +343,8 @@ python recaf_mcp_server.py --http --host 0.0.0.0   # ⚠️ 暴露到网络
 ├── mcp-server/               # Python MCP 服务（工具定义 + 窗口发现）
 ├── scripts/
 │   ├── linux/                # 无头启动 / 安装 / 冒烟 / 自检脚本
-│   └── mcp_tool_matrix.py    # 全量工具矩阵
+│   ├── mcp_tool_matrix.py    # 全量工具矩阵（70 工具 / 109 次调用）
+│   └── bench_python_overhead.py  # 常驻开销基准（CPU / 内存 / 连接数）
 ├── contrib/
 │   ├── dsh-bundle/           # DSH 配置型 bundle（stdio + 自动拉起）
 │   └── systemd/              # systemd 用户单元模板

@@ -1071,6 +1071,11 @@ def main():
     result = config.health_ping()
     logger.info("Health check result: %s", result)
 
+    # Every tool call is one HTTP request: the uvicorn access log writes a line per
+    # request, which is pure overhead (and noise in a host's log pane) once the
+    # server is up.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
     if args.http:
         mcp.run(transport="streamable-http", host=args.host, port=args.port)
     else:

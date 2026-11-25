@@ -12,7 +12,7 @@ import logging
 import httpx
 import json
 import sys
-from typing import Union, Dict, Any
+from typing import Optional, Union, Dict, Any
 
 from . import windows
 
@@ -28,6 +28,35 @@ if not logger.handlers:
     logger.addHandler(handler)
 logger.setLevel(logging.ERROR)
 logger.propagate = False
+
+# One keep-alive HTTP client, reused for every tool call. Creating a client costs
+# real CPU (httpx builds and fills an SSL context: ~18ms per call, even though
+# this talks plain http:// to localhost), and a fresh client also means a fresh
+# TCP connection per call. The client is bound to the event loop that made it, so
+# it is rebuilt when the loop changes (tests, MCP host restarts a session).
+_http: Optional[httpx.AsyncClient] = None
+_http_loop: Any = None
+HTTP_LIMITS = httpx.Limits(max_connections=8, max_keepalive_connections=4)
+
+
+def _http_client() -> httpx.AsyncClient:
+    """The shared client for the running event loop (created on first use)."""
+    global _http, _http_loop
+    loop = asyncio.get_running_loop()
+    if _http is not None and not _http.is_closed and _http_loop is loop:
+        return _http
+    _http = httpx.AsyncClient(trust_env=False, limits=HTTP_LIMITS)
+    _http_loop = loop
+    return _http
+
+
+async def aclose() -> None:
+    """Close the shared client (used by tests and the startup health check)."""
+    global _http, _http_loop
+    client, _http = _http, None
+    _http_loop = None
+    if client is not None and not client.is_closed:
+        await client.aclose()
 
 
 def set_recaf_host(host: str):
@@ -49,10 +78,18 @@ def set_mcp_port(port: int):
     windows.configure(RECAF_HOST, RECAF_PORT, windows.skip_ports | {port})
 
 
+async def _health_ping() -> list:
+    try:
+        return await windows.discover()
+    finally:
+        # asyncio.run() below owns (and then discards) this event loop.
+        await windows.aclose()
+
+
 def health_ping() -> Union[str, Dict[str, Any]]:
     """Synchronous startup check: list the Recaf windows that answer."""
     try:
-        found = asyncio.run(windows.discover())
+        found = asyncio.run(_health_ping())
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return {"error": str(e)}
@@ -76,13 +113,12 @@ async def _request(method: str, endpoint: str, timeout: int, **kwargs) -> Union[
 
         url = f"{base}/{endpoint.lstrip('/')}"
         try:
-            async with httpx.AsyncClient(trust_env=False) as client:
-                resp = await client.request(method, url, timeout=timeout, **kwargs)
-                resp.raise_for_status()
-                try:
-                    return resp.json()
-                except json.JSONDecodeError:
-                    return {"response": resp.text}
+            resp = await _http_client().request(method, url, timeout=timeout, **kwargs)
+            resp.raise_for_status()
+            try:
+                return resp.json()
+            except json.JSONDecodeError:
+                return {"response": resp.text}
 
         except httpx.HTTPStatusError as e:
             error_msg = f"HTTP error {e.response.status_code}: {e.response.text}"

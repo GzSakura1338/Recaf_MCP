@@ -31,7 +31,15 @@ import httpx
 
 PORT_SPAN = 20
 RESERVED_PORTS = {8751}
+# A discovered window list is reused for this long before it is probed again.
 CACHE_TTL_SECONDS = 3.0
+# ...and a window picked from an older list is still returned for this long: the
+# tool call itself proves whether the window answers, and a connection failure
+# invalidates the list and retries. Probing 20 ports per call is pure overhead.
+OPTIMISTIC_TTL_SECONDS = 30.0
+PROBE_TIMEOUT = httpx.Timeout(2.0, connect=0.3)
+# Retry a failed idle stop this long after the attempt, instead of spinning.
+IDLE_RETRY_SECONDS = 30.0
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 host = "127.0.0.1"
@@ -61,7 +69,6 @@ AUTO_START_RETRY_SECONDS = 60.0
 # launched (GUI or scripts/linux) is never touched. This is what keeps a host
 # session cheap: the Java side exists only while it is being used.
 idle_stop_seconds: float = 0.0
-IDLE_CHECK_INTERVAL = 5.0
 
 # One Recaf at a time on Linux: a second instance only costs memory, and the
 # headless host has no use for parallel windows. None = auto (single on Linux).
@@ -73,6 +80,14 @@ _owned_windows: Dict[int, str] = {}
 _owned_procs: Dict[int, Any] = {}
 _last_activity = 0.0
 _idle_thread: Optional[threading.Thread] = None
+# Set by every tool call: the watchdog sleeps on it instead of waking up to look.
+_idle_wakeup = threading.Event()
+
+# One keep-alive client for the port probes, per event loop (a client is bound to
+# the loop that created it). Creating a client is not free: httpx builds and fills
+# an SSL context, which costs ~18ms of CPU for an http:// request that needs none.
+_probe_http: Optional[httpx.AsyncClient] = None
+_probe_http_loop: Any = None
 
 
 def _log(message: str) -> None:
@@ -170,8 +185,10 @@ def invalidate() -> None:
 
 
 def _touch() -> None:
+    """Record activity: any tool call pushes the idle deadline out."""
     global _last_activity
     _last_activity = time.monotonic()
+    _idle_wakeup.set()
 
 
 def owned_windows() -> Dict[int, str]:
@@ -271,6 +288,7 @@ def _start_idle_thread() -> None:
         return
     _idle_thread = threading.Thread(target=_idle_loop, name="recaf-idle-stop", daemon=True)
     _idle_thread.start()
+    _idle_wakeup.set()
 
 
 def _should_stop_idle(now: Optional[float] = None) -> bool:
@@ -280,12 +298,28 @@ def _should_stop_idle(now: Optional[float] = None) -> bool:
 
 
 def _idle_loop() -> None:
-    while True:
-        time.sleep(IDLE_CHECK_INTERVAL)
-        if not _owned_windows:
+    """Block until the idle deadline passes; no periodic wake-up at all.
+
+    Activity sets _idle_wakeup, which shortens the wait to a re-computation of
+    the remaining time, so a busy session costs one wake-up per tool call and an
+    idle one costs exactly one wake-up (when the deadline is reached).
+    """
+    while _owned_windows:
+        if idle_stop_seconds <= 0:
             return
-        if _should_stop_idle():
-            stop_owned_windows_now()
+        # _last_activity is 0 until the first call touches it: give a full idle
+        # window instead of stopping a process that was just registered.
+        last = _last_activity or time.monotonic()
+        remaining = idle_stop_seconds - (time.monotonic() - last)
+        if remaining > 0:
+            if _idle_wakeup.wait(remaining):
+                _idle_wakeup.clear()
+            continue
+        stopped = stop_owned_windows_now()
+        if not stopped:
+            # The process refused to die; do not spin on it.
+            _idle_wakeup.wait(IDLE_RETRY_SECONDS)
+            _idle_wakeup.clear()
 
 
 async def stop_owned_windows() -> List[int]:
@@ -436,12 +470,33 @@ async def _probe(client: httpx.AsyncClient, port: int) -> Optional[Dict[str, Any
         return None
 
 
+def _probe_client() -> httpx.AsyncClient:
+    """Reuse one keep-alive client per event loop instead of one per scan."""
+    global _probe_http, _probe_http_loop
+    loop = asyncio.get_running_loop()
+    if _probe_http is not None and not _probe_http.is_closed and _probe_http_loop is loop:
+        return _probe_http
+    _probe_http = httpx.AsyncClient(
+        trust_env=False, timeout=PROBE_TIMEOUT,
+        limits=httpx.Limits(max_connections=PORT_SPAN, max_keepalive_connections=PORT_SPAN),
+    )
+    _probe_http_loop = loop
+    return _probe_http
+
+
+async def aclose() -> None:
+    """Close the shared probe client (used by tests and the startup health check)."""
+    global _probe_http, _probe_http_loop
+    client, _probe_http = _probe_http, None
+    _probe_http_loop = None
+    if client is not None and not client.is_closed:
+        await client.aclose()
+
+
 async def discover() -> List[Dict[str, Any]]:
     global _cache, _cache_time, _next_number
     ports = [p for p in range(base_port, base_port + PORT_SPAN) if p not in skip_ports]
-    timeout = httpx.Timeout(2.0, connect=0.3)
-    async with httpx.AsyncClient(trust_env=False, timeout=timeout) as client:
-        probed = await asyncio.gather(*(_probe(client, p) for p in ports))
+    probed = await asyncio.gather(*(_probe(_probe_client(), p) for p in ports))
 
     found = [info for info in probed if info]
     for info in found:
@@ -507,9 +562,24 @@ def _pick_default(found: List[Dict[str, Any]]) -> Dict[str, Any]:
     )
 
 
+def _optimistic_pick(spec: str) -> Optional[Dict[str, Any]]:
+    """Pick from the last window list if it is still young enough to trust."""
+    if not _cache or _cache_time <= 0.0:
+        return None
+    if time.monotonic() - _cache_time > OPTIMISTIC_TTL_SECONDS:
+        return None
+    try:
+        return _pick(spec, _cache) if spec else _pick_default(_cache)
+    except WindowError:
+        return None
+
+
 async def resolve(spec: str = "") -> Dict[str, Any]:
     spec = (spec or "").strip()
     _touch()
+    window = _optimistic_pick(spec)
+    if window is not None:
+        return window
     try:
         return await _resolve_once(spec)
     except WindowError as e:
@@ -794,7 +864,7 @@ async def launch(wait_seconds: int = 60) -> Dict[str, Any]:
 
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.5)
         for window in await discover():
             if window["instance_id"] not in before:
                 _remember_owned(window, process)

@@ -225,6 +225,26 @@ first free port from `8750`.
 Every other tool accepts an optional `window`: `"2"`, `"2:client.jar"`, or a unique part of the
 jar name. A stale reference is rejected instead of editing the wrong jar.
 
+## Resident cost
+
+While idle it does one thing: wait for MCP requests. Measured on 8-core ARM Linux over loopback
+(`scripts/bench_python_overhead.py`):
+
+| Metric | Value | Why |
+|---|---|---|
+| Idle CPU | 0.0–0.3% | The watchdog never polls: one `threading.Event` wait until the idle deadline |
+| Resident memory (RSS) | ~36 MB | One HTTP client for the whole session instead of one per call |
+| CPU per tool call | ~0.8 ms | Was 30 ms (a fresh `httpx.AsyncClient` per call: ~18 ms just to build the TLS context) |
+| Latency per tool call | ~0.8 ms | Keep-alive reuses the connection, no handshake per call |
+| Port probes per call | 0 | Resolution is cached for 30 s; a failed request invalidates and retries |
+
+How:
+
+- Every tool call shares one keep-alive `httpx.AsyncClient` (rebuilt only when the event loop changes); port discovery reuses one too.
+- Window resolution is optimistic: the last window list is reused for 30 s without touching the port range, and only a failed request triggers `invalidate()` + retry — so it can never hit the wrong window.
+- Idle recycling is event-driven: a tool call `set()`s the event to recompute the deadline, no call means one long wait; a failed stop backs off 30 s instead of spinning.
+- Reproduce it: `python scripts/bench_python_overhead.py` (a fake plugin answers `/instance`, `/health`, `/class-info` and the script reports CPU/memory/connections per call plus idle CPU).
+
 ## Configuration reference
 
 ### MCP server flags
@@ -333,7 +353,8 @@ firewall or VPN.
 ├── mcp-server/               # Python MCP server (tool definitions + window discovery)
 ├── scripts/
 │   ├── linux/                # headless launchers, installer, smoke tests
-│   └── mcp_tool_matrix.py    # full tool matrix
+│   ├── mcp_tool_matrix.py    # full tool matrix (70 tools, 109 calls)
+│   └── bench_python_overhead.py  # resident-overhead benchmark
 ├── contrib/
 │   ├── dsh-bundle/           # DSH configuration-only bundle (stdio + auto-start)
 │   └── systemd/              # systemd user unit templates
