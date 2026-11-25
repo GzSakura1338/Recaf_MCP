@@ -14,13 +14,25 @@ inside the Recaf JavaFX process.
 Default ports:
     Recaf plugin HTTP ..... 8750
     Recaf MCP (streamable). 8751
+
+Linux headless: Recaf 4 can run without its JavaFX UI ("recaf --headless --idle"),
+so an ssh session, container or CI runner needs no X server. open_recaf_window then
+starts new processes headless automatically (no DISPLAY => headless), or force it:
+
+    python recaf_mcp_server.py --http --headless \
+        --recaf-jar libs/recaf.jar --recaf-plugins-dir build/libs
+
+See docs/linux-headless.md.
 """
 
 import argparse
 import functools
 import inspect
 import logging
+import os
+import shlex
 import sys
+from pathlib import Path
 from typing import Annotated
 from fastmcp import FastMCP
 from pydantic import Field
@@ -35,7 +47,10 @@ INSTRUCTIONS = (
     "window for that single call. switch_recaf_window sets a default that is shared by every "
     "client of this server, so when several agents work in parallel always pass `window` "
     "explicitly. With exactly one window open, `window` can be omitted. Tools that modify a "
-    "workspace act only on the selected window."
+    "workspace act only on the selected window. "
+    "A window can run headless (Recaf started with --headless, e.g. on Linux without a display): "
+    "it has no editor UI, so fetch_current_class and get_selected_text answer with "
+    "ui_available=false; pass class names explicitly to the other tools there."
 )
 
 mcp = FastMCP("Recaf MCP Plugin Reverse Engineering Server", instructions=INSTRUCTIONS)
@@ -785,6 +800,19 @@ async def save_workspace(output_path: str) -> dict:
 # Entrypoint
 # =============================================================================
 
+def _default_plugin_dir() -> str:
+    """Use build/libs when it already holds the plugin jar, so a dev checkout works out of the box."""
+    root = Path(__file__).resolve().parents[1]
+    candidates = [root / "build" / "libs", root.parent / "build" / "libs"]
+    for candidate in candidates:
+        try:
+            if any(candidate.glob("recaf-mcp-plugin*.jar")):
+                return str(candidate)
+        except OSError:
+            continue
+    return ""
+
+
 def main():
     parser = argparse.ArgumentParser("MCP Server for Recaf")
     parser.add_argument(
@@ -827,12 +855,71 @@ def main():
         default="127.0.0.1",
         type=str,
     )
+    parser.add_argument(
+        "--headless",
+        help="Start Recaf with its native headless mode ('--headless --idle': no display needed) "
+             "when open_recaf_window has to launch a new process. Default: auto — headless on "
+             "Linux when DISPLAY is unset, otherwise a normal GUI start.",
+        dest="headless",
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--gui",
+        help="Always start new Recaf processes as a GUI window, even without DISPLAY.",
+        dest="headless",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--recaf-plugins-dir",
+        help="Directory holding the recaf-mcp plugin jar, passed to headless Recaf as -r. "
+             "Default: $RECAF_PLUGIN_DIR / $RECAF_EXTRA_PLUGINS, else build/libs if it has the plugin.",
+        default=None,
+        type=str,
+    )
+    parser.add_argument(
+        "--recaf-data-dir",
+        help="Recaf data directory for new headless processes (-d). Default: $RECAF_DATA_DIR "
+             "(empty = Recaf's own default, normally $XDG_CONFIG_HOME/Recaf).",
+        default=None,
+        type=str,
+    )
+    parser.add_argument(
+        "--java",
+        help="java executable used to start Recaf. Default: $RECAF_JAVA, $JAVA_HOME/bin/java, PATH.",
+        default=None,
+        type=str,
+    )
+    parser.add_argument(
+        "--java-args",
+        help="Extra JVM arguments for new Recaf processes, e.g. '-Xmx4g -Dfile.encoding=UTF-8'. "
+             "Default: $RECAF_JAVA_ARGS.",
+        default=None,
+        type=str,
+    )
+    parser.add_argument(
+        "--recaf-launch-log",
+        help="Append the output of processes started by open_recaf_window to this file. "
+             "Default: $RECAF_LAUNCH_LOG (useful for headless debugging).",
+        default=None,
+        type=str,
+    )
     args = parser.parse_args()
 
     config.set_recaf_host(args.recaf_host)
     config.set_recaf_port(args.recaf_port)
     config.set_mcp_port(args.port)
-    windows.set_launch_jar(args.recaf_jar)
+    windows.configure_launch(
+        recaf_jar=args.recaf_jar or os.environ.get("RECAF_JAR") or None,
+        headless_mode=args.headless,
+        plugins=args.recaf_plugins_dir or os.environ.get("RECAF_PLUGIN_DIR")
+        or os.environ.get("RECAF_EXTRA_PLUGINS") or _default_plugin_dir(),
+        data=args.recaf_data_dir if args.recaf_data_dir is not None else os.environ.get("RECAF_DATA_DIR") or None,
+        java=args.java or os.environ.get("RECAF_JAVA") or None,
+        java_args=shlex.split(args.java_args if args.java_args is not None
+                              else os.environ.get("RECAF_JAVA_ARGS", "")),
+        log=args.recaf_launch_log or os.environ.get("RECAF_LAUNCH_LOG") or None,
+    )
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         logger.warning(

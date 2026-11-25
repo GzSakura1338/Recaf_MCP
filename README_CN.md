@@ -93,6 +93,9 @@ Java 插件运行在 Recaf 内部，暴露本地 HTTP API；Python MCP 服务器
 - Python 3.10+
 - `recaf.jar`
 
+Linux 上不需要 X server / Xvfb：Recaf 自带 `--headless --idle` 无头模式，插件照常提供 HTTP API。
+详见 [docs/linux-headless.md](docs/linux-headless.md)。
+
 ## 快速开始
 
 ### 1. 提供 recaf.jar
@@ -110,14 +113,24 @@ $env:RECAF_JAR="D:\deobf\recaf\recaf.jar"
 ### 2. 构建插件
 
 ```powershell
-.\gradlew.bat jar
+.\gradlew.bat jar     # Windows
+```
+
+```bash
+./gradlew jar          # Linux / macOS
 ```
 
 输出：`build/libs/recaf-mcp-plugin-0.1.0.jar`
 
 ### 3. 安装插件
 
-将 jar 复制到 Recaf 插件缓存目录 `%APPDATA%/Recaf/plugins/`，启动 Recaf。
+将 jar 复制到 Recaf 插件缓存目录：
+
+- Windows：`%APPDATA%/Recaf/plugins/`
+- Linux：`${XDG_CONFIG_HOME:-~/.config}/Recaf/plugins/`
+- 或者用 `-r <目录>` / `RECAF_EXTRA_PLUGINS` 指向 jar 所在目录
+
+然后启动 Recaf。Linux 上这套流程可以一条命令搞定：`./scripts/linux/install.sh`。
 
 加载成功后日志显示：
 
@@ -131,6 +144,10 @@ Recaf MCP plugin listening on http://127.0.0.1:8750
 pip install -r requirements.txt
 ```
 
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # Linux
+```
+
 ### 5. 启动 MCP 服务器
 
 ```powershell
@@ -142,6 +159,43 @@ python recaf_mcp_server.py --http --port 8751
 ```powershell
 .\start_recaf_mcp_http.ps1
 ```
+
+```bash
+./scripts/linux/start_mcp_http.sh start
+```
+
+---
+
+## Linux 与无头运行
+
+Linux（服务器 / 容器 / CI / 无桌面的 ssh 会话）用三个脚本：
+
+```bash
+# 1. 一次性安装：编译插件 + 装进 Recaf 插件目录 + 建 .venv
+./scripts/linux/install.sh
+
+# 2. 启动无头 Recaf（--headless --idle，不需要 DISPLAY），可顺手打开目标 jar
+./scripts/linux/start_recaf_headless.sh start --input /path/to/target.jar
+
+# 3. 启动 MCP 服务：http://127.0.0.1:8751/mcp
+./scripts/linux/start_mcp_http.sh start
+```
+
+两个启动脚本都支持 `start|stop|status|restart` 和 `--foreground`，日志在 `logs/`，
+pid 在 `.run/`。systemd 用户单元模板见 `contrib/systemd/`。
+
+无头模式下 `fetch_current_class` / `get_selected_text` 这类"读界面"的工具会返回
+`ui_available: false` 和说明，而不是报错；其余工具（类、方法、搜索、xref、重命名、
+导出、字节码编辑）全部可用。`list_recaf_windows` 列出的每个窗口都带 `headless` 字段。
+
+端到端自检：
+
+```bash
+./scripts/linux/smoke_test.sh --with-mcp
+```
+
+它会起一个一次性的无头 Recaf，验证插件 HTTP API 和 MCP 工具链。完整说明、参数表、
+Dockerfile、排错表见 [docs/linux-headless.md](docs/linux-headless.md)。
 
 ---
 
@@ -165,6 +219,11 @@ python recaf_mcp_server.py --http --port 8751
 | MCP HTTP | `127.0.0.1:8751/mcp` |
 
 健康检查：
+
+```bash
+curl http://127.0.0.1:8750/health      # ok
+curl http://127.0.0.1:8750/instance    # 进程/端口/是否有工作区/是否无头
+```
 
 ```powershell
 Invoke-WebRequest http://127.0.0.1:8750/health
@@ -199,6 +258,9 @@ Invoke-WebRequest http://127.0.0.1:8750/health
 .
 ├── src/                  # Java 插件源码
 ├── mcp-server/           # Python MCP 服务端
+├── scripts/linux/        # Linux 无头启动 / 安装 / 自检脚本
+├── contrib/systemd/      # systemd 用户单元模板
+├── docs/linux-headless.md# 无头运行完整说明
 ├── libs/                 # recaf.jar 存放处
 ├── recaf_mcp_server.py   # MCP 服务器入口
 ├── requirements.txt      # Python 依赖

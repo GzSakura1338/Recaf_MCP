@@ -3,11 +3,13 @@
 ## Before You Push
 
 1. Put your local `recaf.jar` in `libs/recaf.jar` only for building.
-2. Run `.\gradlew.bat jar`.
+2. Run `.\gradlew.bat jar` (Windows) or `./gradlew jar` (Linux/macOS).
 3. Start Recaf and confirm the plugin logs `http://127.0.0.1:8750`.
 4. Run `pip install -r mcp-server/requirements.txt`.
 5. Start `python mcp-server/recaf_mcp_server.py --http --port 8751`.
 6. Confirm the Python server reports `Health check result: ok`.
+7. On Linux, run `./scripts/linux/smoke_test.sh --with-mcp` to check headless mode
+   (no display, no Xvfb) end to end, and `./test.sh --headless` for the quick variant.
 
 ## What Should Be In GitHub
 
@@ -15,6 +17,8 @@
 - Python MCP server under `mcp-server/`
 - root `recaf_mcp_server.py`
 - root `requirements.txt`
+- `scripts/linux/` (headless launchers, installer, self test)
+- `contrib/systemd/`, `docs/linux-headless.md`
 - `README.md`
 - `LICENSE`
 - `.gitignore`

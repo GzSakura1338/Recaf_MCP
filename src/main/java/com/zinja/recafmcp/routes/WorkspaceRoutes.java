@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.zinja.recafmcp.http.JsonResponses;
 import com.zinja.recafmcp.http.McpHttpServer;
 import com.zinja.recafmcp.state.UiState;
+import com.zinja.recafmcp.state.UiUnavailableException;
 import software.coley.recaf.info.properties.builtin.InputFilePathProperty;
 import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.services.workspace.io.ResourceImporter;
@@ -106,19 +107,39 @@ public class WorkspaceRoutes {
         });
 
         server.get("/current-class", (req, res) -> {
-            String name = uiState.getCurrentClassName();
             JsonObject out = new JsonObject();
-            out.addProperty("class_name", RouteSupport.external(name));
-            if (name != null) {
-                Workspace ws = wm.getCurrent();
-                out.addProperty("found", ws != null && ws.findJvmClass(name) != null);
+            out.addProperty("ui_available", uiState.isAvailable());
+            out.addProperty("headless", uiState.isHeadless());
+            try {
+                String name = uiState.getCurrentClassName();
+                out.addProperty("class_name", RouteSupport.external(name));
+                if (name != null) {
+                    Workspace ws = wm.getCurrent();
+                    out.addProperty("found", ws != null && ws.findJvmClass(name) != null);
+                }
+            } catch (UiUnavailableException e) {
+                // Headless Recaf: no editor tabs, so there is no "current class".
+                // Answer normally instead of failing the request.
+                out.addProperty("class_name", (String) null);
+                out.addProperty("reason", e.getMessage());
+                out.addProperty("hint", "Headless mode has no UI selection; pass class_name explicitly "
+                        + "to get_class_source / get_method_bytecode / get_all_classes.");
             }
             res.json(out);
         });
 
         server.get("/selected-text", (req, res) -> {
             JsonObject out = new JsonObject();
-            out.addProperty("text", uiState.getSelectedText());
+            out.addProperty("ui_available", uiState.isAvailable());
+            out.addProperty("headless", uiState.isHeadless());
+            try {
+                out.addProperty("text", uiState.getSelectedText());
+            } catch (UiUnavailableException e) {
+                out.addProperty("text", (String) null);
+                out.addProperty("reason", e.getMessage());
+                out.addProperty("hint", "Headless mode has no editor selection; read the class with "
+                        + "get_class_source instead.");
+            }
             res.json(out);
         });
     }

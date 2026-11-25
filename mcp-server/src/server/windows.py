@@ -14,6 +14,7 @@ import asyncio
 import contextvars
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,17 @@ host = "127.0.0.1"
 base_port = 8750
 skip_ports = set(RESERVED_PORTS)
 launch_jar: Optional[str] = None
+
+# How a brand-new Recaf process is started. Everything here can be set from the
+# command line (see recaf_mcp_server.py) or from the environment, which is what
+# the Linux headless launcher and systemd units use.
+#   headless: None = auto (headless on Linux when there is no DISPLAY), True/False = force
+headless: Optional[bool] = None
+plugin_dir: Optional[str] = None
+data_dir: Optional[str] = None
+java_binary: Optional[str] = None
+extra_java_args: List[str] = []
+launch_log: Optional[str] = None
 
 requested_window = contextvars.ContextVar("recaf_window", default="")
 
@@ -69,6 +81,37 @@ def set_launch_jar(path: Optional[str]) -> None:
     launch_jar = path
 
 
+def configure_launch(recaf_jar: Optional[str] = None, headless_mode: Optional[bool] = None,
+                     plugins: Optional[str] = None, data: Optional[str] = None,
+                     java: Optional[str] = None, java_args: Optional[List[str]] = None,
+                     log: Optional[str] = None) -> None:
+    """Configure how open_recaf_window starts a new Recaf process."""
+    global launch_jar, headless, plugin_dir, data_dir, java_binary, extra_java_args, launch_log
+    if recaf_jar is not None:
+        launch_jar = recaf_jar
+    if headless_mode is not None:
+        headless = headless_mode
+    if plugins is not None:
+        plugin_dir = plugins
+    if data is not None:
+        data_dir = data
+    if java is not None:
+        java_binary = java
+    if java_args is not None:
+        extra_java_args = list(java_args)
+    if log is not None:
+        launch_log = log
+
+
+def _headless_requested() -> bool:
+    """True when a new Recaf should start with --headless --idle (no display needed)."""
+    if headless is not None:
+        return headless
+    # Auto: a Linux box without a display cannot start Recaf's GUI at all, so
+    # headless is the only thing that can work there.
+    return sys.platform.startswith("linux") and not os.environ.get("DISPLAY")
+
+
 def invalidate() -> None:
     global _cache_time
     _cache_time = 0.0
@@ -83,6 +126,7 @@ def describe(window: Dict[str, Any], active: Optional[int] = None) -> Dict[str, 
         "has_workspace": window.get("has_workspace"),
         "port": window["port"],
         "pid": window.get("pid"),
+        "headless": window.get("headless"),
         "active": window["window"] == active,
     }
 
@@ -108,6 +152,7 @@ async def _probe(client: httpx.AsyncClient, port: int) -> Optional[Dict[str, Any
                 "has_workspace": info.get("has_workspace"),
                 "jar_name": info.get("jar_name"),
                 "jar_path": info.get("jar_path"),
+                "headless": info.get("headless"),
             }
         if resp.status_code != 404:
             return None
@@ -238,7 +283,16 @@ async def switch(spec: str) -> Dict[str, Any]:
 
 
 def _java_executable() -> Optional[str]:
+    """Locate java, preferring --java, then RECAF_JAVA, then JAVA_HOME, then PATH."""
     on_windows = sys.platform == "win32"
+    if java_binary:
+        candidate = Path(java_binary).expanduser()
+        if candidate.is_file():
+            return str(candidate)
+        found = shutil.which(java_binary)
+        if found:
+            return found
+        raise WindowError(f"java executable not found: {java_binary}")
     for name in ("javaw", "java") if on_windows else ("java",):
         java_home = os.environ.get("JAVA_HOME")
         if java_home:
@@ -271,13 +325,36 @@ def _split_windows_command_line(command_line: str) -> List[str]:
         kernel32.LocalFree(ctypes.cast(argv, ctypes.c_void_p))
 
 
+def _proc_command_line(pid: int) -> Optional[List[str]]:
+    """Exact argv from /proc (Linux). Fails on hidepid mounts and non-Linux systems."""
+    try:
+        raw = Path(f"/proc/{int(pid)}/cmdline").read_bytes()
+    except OSError:
+        return None
+    return [part.decode(errors="replace") for part in raw.split(b"\0") if part] or None
+
+
+def _ps_command_line(pid: int) -> Optional[List[str]]:
+    """Fallback argv for Linux when /proc/<pid>/cmdline is not readable."""
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "args=", "-p", str(int(pid))],
+            capture_output=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    text = out.stdout.decode("utf-8", errors="replace").strip()
+    if not text:
+        return None
+    try:
+        return shlex.split(text) or None
+    except ValueError:
+        return text.split() or None
+
+
 def _command_line_of(pid: int) -> Optional[List[str]]:
     if sys.platform != "win32":
-        try:
-            raw = Path(f"/proc/{int(pid)}/cmdline").read_bytes()
-        except OSError:
-            return None
-        return [part.decode(errors="replace") for part in raw.split(b"\0") if part] or None
+        return _proc_command_line(pid) or _ps_command_line(pid)
 
     script = (
         "[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
@@ -298,21 +375,59 @@ def _jar_command(jar: str) -> List[str]:
     java = _java_executable()
     if java is None:
         raise WindowError("java was not found; set JAVA_HOME or put java on PATH")
-    return [java, "-jar", jar]
+    return [java, *extra_java_args, "-jar", jar]
+
+
+def _headless_command(jar: str) -> List[str]:
+    """
+    Build the native headless Recaf command line.
+
+    Recaf 4 can skip its JavaFX UI entirely (``--headless``) and keep running in
+    the foreground for plugin-hosted services (``--idle``). That is what makes a
+    display-less Linux box usable: no X server, no Xvfb, no Monocle hacks.
+    ``-r`` points Recaf at the plugin jar directory and ``-d`` overrides the data
+    directory, so several headless Recaf processes can run side by side.
+    """
+    command = _jar_command(jar)
+    command += ["--headless", "--idle"]
+    if plugin_dir:
+        command += ["-r", plugin_dir]
+    if data_dir:
+        command += ["-d", data_dir]
+    return command
+
+
+def _window_command(jar: str) -> List[str]:
+    return _headless_command(jar) if _headless_requested() else _jar_command(jar)
 
 
 def _launch_command(found: List[Dict[str, Any]]) -> List[str]:
     if launch_jar:
-        return _jar_command(launch_jar)
+        return _window_command(launch_jar)
+
+    # Copying an open window's command line keeps its java, jar and mode. Only a
+    # window started in the mode we want is copied, so an explicit --headless /
+    # --gui always wins, and a headless window keeps its -r / -d flags.
+    want_headless = _headless_requested()
     for window in found:
-        if window.get("pid"):
-            command = _command_line_of(window["pid"])
-            if command:
-                return command
+        pid = window.get("pid")
+        if not pid:
+            continue
+        command = _command_line_of(pid)
+        if not command:
+            continue
+        if ("--headless" in command) == want_headless:
+            return command
+
     for candidate in (os.environ.get("RECAF_JAR"), REPO_ROOT / "libs" / "recaf.jar",
                       REPO_ROOT.parent / "recaf" / "recaf.jar"):
         if candidate and Path(candidate).is_file():
-            return _jar_command(str(candidate))
+            return _window_command(str(candidate))
+    if _headless_requested():
+        raise WindowError(
+            "cannot tell how to start headless Recaf: no recaf.jar was found; start the MCP server "
+            "with --recaf-jar <path to recaf.jar> (and --recaf-plugins-dir <dir with the plugin jar>)"
+        )
     raise WindowError(
         "cannot tell how to start Recaf: no open window reports its command line and no recaf.jar "
         "was found; start the MCP server with --recaf-jar <path to recaf.jar>"
@@ -337,13 +452,25 @@ def _detached_kwargs() -> Dict[str, Any]:
 async def launch(wait_seconds: int = 60) -> Dict[str, Any]:
     before = {w["instance_id"] for w in await _windows(refresh=True)}
     command = await asyncio.to_thread(_launch_command, list(_cache))
+    stdout = subprocess.DEVNULL
+    stderr = subprocess.DEVNULL
+    log_handle = None
+    if launch_log:
+        try:
+            log_handle = open(launch_log, "ab")
+            stdout = stderr = log_handle
+        except OSError:
+            log_handle = None
     try:
         process = subprocess.Popen(
-            command, cwd=_launch_cwd(command), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, close_fds=True, **_detached_kwargs(),
+            command, cwd=_launch_cwd(command), stdin=subprocess.DEVNULL, stdout=stdout,
+            stderr=stderr, close_fds=True, **_detached_kwargs(),
         )
     except OSError as e:
         raise WindowError(f"failed to start Recaf ({command[0]}): {e}")
+    finally:
+        if log_handle is not None:
+            log_handle.close()
 
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:

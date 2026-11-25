@@ -11,6 +11,8 @@ __pycache__/
 *.pyo
 
 libs/recaf.jar
+.run/
+logs/
 *.log
 
 !.gitkeep

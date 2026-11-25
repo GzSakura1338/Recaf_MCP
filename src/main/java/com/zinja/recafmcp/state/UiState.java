@@ -9,6 +9,7 @@ import javafx.stage.Window;
 import org.fxmisc.richtext.CodeArea;
 import software.coley.bentofx.dockable.Dockable;
 import software.coley.bentofx.layout.container.DockContainerLeaf;
+import software.coley.recaf.launch.LaunchArguments;
 import software.coley.recaf.services.navigation.ClassNavigable;
 import software.coley.recaf.ui.docking.DockingManager;
 
@@ -25,13 +26,60 @@ import java.util.function.Predicate;
 public class UiState {
     private static final long FX_TIMEOUT_SECONDS = 5;
 
-    private final Instance<DockingManager> dockingManager;
+    public static final String HEADLESS_REASON =
+            "Recaf is running headless (no JavaFX UI); this tool needs the GUI. "
+                    + "Use get_class_source, get_all_classes, get_method_bytecode, ... instead.";
 
-    public UiState(Instance<DockingManager> dockingManager) {
+    private final Instance<DockingManager> dockingManager;
+    private final Instance<LaunchArguments> launchArguments;
+
+    /**
+     * {@code null} until the toolkit answers; {@code true} once it does. A failed
+     * probe is never cached because a GUI Recaf may finish starting its toolkit
+     * after the plugin is enabled.
+     */
+    private volatile Boolean toolkitReady;
+
+    public UiState(Instance<DockingManager> dockingManager, Instance<LaunchArguments> launchArguments) {
         this.dockingManager = dockingManager;
+        this.launchArguments = launchArguments;
+    }
+
+    /**
+     * @return {@code true} when Recaf was started with {@code --headless}.
+     * Prefers Recaf's own parsed launch arguments; falls back to probing JavaFX.
+     */
+    public boolean isHeadless() {
+        try {
+            if (launchArguments != null && launchArguments.isResolvable()) {
+                return launchArguments.get().isHeadless();
+            }
+        } catch (RuntimeException | LinkageError ignored) {
+            // Fall through to the toolkit probe below.
+        }
+        return !isAvailable();
+    }
+
+    /**
+     * @return {@code true} when the JavaFX toolkit is initialized, so UI lookups can work.
+     */
+    public boolean isAvailable() {
+        Boolean ready = toolkitReady;
+        if (ready != null) {
+            return ready;
+        }
+        try {
+            Platform.runLater(() -> {
+            });
+        } catch (IllegalStateException | LinkageError e) {
+            return false;
+        }
+        toolkitReady = Boolean.TRUE;
+        return true;
     }
 
     public String getCurrentClassName() throws Exception {
+        requireUi();
         return onFxThread(() -> {
             Node pane = currentClassPane();
             return pane == null ? null : ((ClassNavigable) pane).getClassPath().getValue().getName();
@@ -39,6 +87,7 @@ public class UiState {
     }
 
     public String getSelectedText() throws Exception {
+        requireUi();
         return onFxThread(() -> {
             String selection = selectionOf((CodeArea) focusedAncestor(CodeArea.class::isInstance));
             if (selection != null) return selection;
@@ -55,12 +104,25 @@ public class UiState {
         });
     }
 
+    private void requireUi() {
+        if (!isAvailable()) {
+            throw new UiUnavailableException(HEADLESS_REASON);
+        }
+    }
+
     private Node currentClassPane() {
         Node focused = focusedAncestor(ClassNavigable.class::isInstance);
         if (focused != null) return focused;
 
         if (!dockingManager.isResolvable()) return null;
-        DockContainerLeaf primary = dockingManager.get().getPrimaryDockingContainer();
+        DockContainerLeaf primary;
+        try {
+            primary = dockingManager.get().getPrimaryDockingContainer();
+        } catch (IllegalStateException e) {
+            // GUI mode, but the main window is still being built: the plugin's HTTP
+            // server starts before the UI is ready. No selection exists yet.
+            return null;
+        }
         Dockable selected = primary == null ? null : primary.getSelectedDockable();
         return selected != null && selected.getNode() instanceof ClassNavigable ? selected.getNode() : null;
     }

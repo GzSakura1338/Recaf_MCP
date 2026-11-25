@@ -1,0 +1,26 @@
+# The Python MCP server in front of the headless Recaf plugin.
+#
+#   cp contrib/systemd/recaf-mcp-server.service ~/.config/systemd/user/
+#   systemctl --user enable --now recaf-mcp-server
+#
+# Listens on http://127.0.0.1:8751/mcp (streamable HTTP, no auth: keep it local).
+
+[Unit]
+Description=Recaf MCP server (streamable HTTP)
+Documentation=https://github.com/GzSakura1338/Recaf_MCP
+After=recaf-mcp-headless.service
+Wants=recaf-mcp-headless.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Recaf_MCP
+Environment=RECAF_HOST=127.0.0.1
+Environment=RECAF_PORT=8750
+Environment=RECAF_MCP_HTTP_PORT=8751
+Environment=RECAF_HEADLESS=1
+ExecStart=%h/Recaf_MCP/.venv/bin/python %h/Recaf_MCP/recaf_mcp_server.py --http --host 127.0.0.1 --port 8751 --recaf-port 8750
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -93,6 +93,9 @@ Full bytecode read/write: instruction-level editing, JASM text assembly, access 
 - Python 3.10+
 - `recaf.jar`
 
+On Linux no X server / Xvfb is needed: Recaf has a native `--headless --idle` mode and the
+plugin keeps serving its HTTP API there. See [docs/linux-headless.md](docs/linux-headless.md).
+
 ## Quick Start
 
 ### 1. Provide recaf.jar
@@ -145,6 +148,40 @@ Or use the launcher script:
 
 ---
 
+## Linux & Headless
+
+On Linux (servers, containers, CI, ssh sessions without a desktop) three scripts are enough:
+
+```bash
+# 1. build the plugin, install it into Recaf's plugin directory, create .venv
+./scripts/linux/install.sh
+
+# 2. start headless Recaf (--headless --idle: no DISPLAY needed), optionally with a target jar
+./scripts/linux/start_recaf_headless.sh start --input /path/to/target.jar
+
+# 3. start the MCP server: http://127.0.0.1:8751/mcp
+./scripts/linux/start_mcp_http.sh start
+```
+
+Both launchers support `start|stop|status|restart` and `--foreground`; logs go to `logs/`,
+pid files to `.run/`. systemd user unit templates live in `contrib/systemd/`.
+
+In headless mode the UI-bound tools (`fetch_current_class`, `get_selected_text`) answer with
+`ui_available: false` and a reason instead of failing; everything else (classes, methods,
+search, xrefs, renames, export, bytecode editing) works normally. `list_recaf_windows` reports a
+`headless` flag per window.
+
+End-to-end self test:
+
+```bash
+./scripts/linux/smoke_test.sh --with-mcp
+```
+
+It starts a throw-away headless Recaf and verifies the plugin HTTP API plus the MCP tool layer.
+Full guide, option tables, a Dockerfile and a troubleshooting table: [docs/linux-headless.md](docs/linux-headless.md).
+
+---
+
 ## MCP Config
 
 ```json
@@ -165,6 +202,11 @@ Or use the launcher script:
 | MCP HTTP | `127.0.0.1:8751/mcp` |
 
 Health check:
+
+```bash
+curl http://127.0.0.1:8750/health      # ok
+curl http://127.0.0.1:8750/instance    # pid, port, workspace, headless flag
+```
 
 ```powershell
 Invoke-WebRequest http://127.0.0.1:8750/health
@@ -188,6 +230,7 @@ Every other tool takes an optional `window`: `"2"`, `"2:client.jar"`, or a uniqu
 - With several open and no default chosen, a call fails with the list of windows instead of guessing.
 - The default set by `switch_recaf_window` is shared by every client of the MCP server (the HTTP transport has no per-client session). When several agents work in parallel, have each pass `window` explicitly.
 - `open_recaf_window` starts the new Recaf the same way an open window was started (same `java` and jar, read from its process). With no window open it uses `--recaf-jar`, then `RECAF_JAR`, then `libs/recaf.jar`.
+- On Linux without `DISPLAY` the new process is started headless (`--headless --idle`, no X server). Force either mode with `--headless` / `--gui`, `--recaf-plugins-dir` and `--recaf-data-dir`.
 
 Windows that still run an older plugin without `/instance` are found too, but cannot be cloned by `open_recaf_window`.
 
@@ -199,6 +242,9 @@ Windows that still run an older plugin without `/instance` are found too, but ca
 .
 ├── src/                  # Java plugin source
 ├── mcp-server/           # Python MCP server
+├── scripts/linux/        # Linux headless launchers, installer, self test
+├── contrib/systemd/      # systemd user unit templates
+├── docs/linux-headless.md# headless guide
 ├── libs/                 # recaf.jar goes here
 ├── recaf_mcp_server.py   # MCP server entry point
 ├── requirements.txt      # Python dependencies

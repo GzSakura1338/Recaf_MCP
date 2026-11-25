@@ -8,6 +8,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import software.coley.recaf.plugin.Plugin;
 import software.coley.recaf.plugin.PluginInformation;
+import software.coley.recaf.launch.LaunchArguments;
 import software.coley.recaf.services.decompile.DecompilerManager;
 import software.coley.recaf.services.decompile.DecompilerManagerConfig;
 import software.coley.recaf.services.inheritance.InheritanceGraphService;
@@ -48,6 +49,7 @@ public class RecafMcpPlugin implements Plugin {
     private final MappingFormatManager mappingFormatManager;
     private final InheritanceGraphService inheritanceGraphService;
     private final Instance<DockingManager> dockingManager;
+    private final Instance<LaunchArguments> launchArguments;
 
     private McpHttpServer server;
 
@@ -60,7 +62,8 @@ public class RecafMcpPlugin implements Plugin {
                           MappingApplierService mappingApplierService,
                           MappingFormatManager mappingFormatManager,
                           InheritanceGraphService inheritanceGraphService,
-                          Instance<DockingManager> dockingManager) {
+                          Instance<DockingManager> dockingManager,
+                          Instance<LaunchArguments> launchArguments) {
         this.workspaceManager = workspaceManager;
         this.resourceImporter = resourceImporter;
         this.decompilerManager = decompilerManager;
@@ -70,17 +73,19 @@ public class RecafMcpPlugin implements Plugin {
         this.mappingFormatManager = mappingFormatManager;
         this.inheritanceGraphService = inheritanceGraphService;
         this.dockingManager = dockingManager;
+        this.launchArguments = launchArguments;
     }
 
     @Override
     public void onEnable() {
-        String host = System.getProperty("recaf.mcp.host", DEFAULT_HOST);
-        int port = Integer.getInteger("recaf.mcp.port", DEFAULT_PORT);
+        String host = setting("recaf.mcp.host", "RECAF_MCP_HOST", DEFAULT_HOST);
+        int port = intSetting("recaf.mcp.port", "RECAF_MCP_PORT", DEFAULT_PORT);
+        UiState uiState = new UiState(dockingManager, launchArguments);
 
         server = new McpHttpServer(host, port);
         server.get("/health", (req, res) -> res.text("ok"));
 
-        new WorkspaceRoutes(workspaceManager, resourceImporter, new UiState(dockingManager)).register(server);
+        new WorkspaceRoutes(workspaceManager, resourceImporter, uiState).register(server);
         new ClassRoutes(workspaceManager).register(server);
         new MethodRoutes(workspaceManager, decompilerManager).register(server);
         new SearchRoutes(workspaceManager, searchService).register(server);
@@ -92,7 +97,7 @@ public class RecafMcpPlugin implements Plugin {
         new FilesRoutes(workspaceManager).register(server);
         new ExportRoutes(workspaceManager).register(server);
         new BytecodeEditRoutes(workspaceManager).register(server);
-        new InstanceRoutes(workspaceManager, server).register(server);
+        new InstanceRoutes(workspaceManager, server, uiState).register(server);
         server.get("/__plugin_diag__", (req, res) -> res.text("plugin ok, routes registered"));
 
         try {
@@ -100,6 +105,28 @@ public class RecafMcpPlugin implements Plugin {
             LOG.info("Recaf MCP plugin listening on http://" + host + ":" + server.getPort());
         } catch (Exception e) {
             LOG.log(Level.SEVERE, "Failed to start Recaf MCP HTTP server", e);
+        }
+    }
+
+    /**
+     * Resolve a setting from a system property first, then an environment variable.
+     * Environment support keeps {@code recaf --headless} usable from systemd units,
+     * containers and the Linux launcher scripts, where {@code -D} flags are awkward.
+     */
+    private static String setting(String property, String env, String fallback) {
+        String value = System.getProperty(property);
+        if (value == null || value.isBlank()) value = System.getenv(env);
+        return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private static int intSetting(String property, String env, int fallback) {
+        String value = setting(property, env, null);
+        if (value == null) return fallback;
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            LOG.warning("Ignoring invalid " + property + "/" + env + " value '" + value + "'");
+            return fallback;
         }
     }
 

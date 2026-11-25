@@ -2,6 +2,7 @@ package com.zinja.recafmcp.routes;
 
 import com.google.gson.JsonObject;
 import com.zinja.recafmcp.http.McpHttpServer;
+import com.zinja.recafmcp.state.UiState;
 import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.workspace.model.EmptyWorkspace;
 import software.coley.recaf.workspace.model.Workspace;
@@ -12,11 +13,13 @@ import java.util.UUID;
 public class InstanceRoutes {
     private final WorkspaceManager wm;
     private final McpHttpServer server;
+    private final UiState uiState;
     private final String instanceId = UUID.randomUUID().toString();
 
-    public InstanceRoutes(WorkspaceManager wm, McpHttpServer server) {
+    public InstanceRoutes(WorkspaceManager wm, McpHttpServer server, UiState uiState) {
         this.wm = wm;
         this.server = server;
+        this.uiState = uiState;
     }
 
     public void register(McpHttpServer server) {
@@ -25,6 +28,10 @@ public class InstanceRoutes {
             out.addProperty("instance_id", instanceId);
             out.addProperty("pid", ProcessHandle.current().pid());
             out.addProperty("port", this.server.getPort());
+            // Headless Recaf (recaf --headless --idle) has no UI, which MCP clients
+            // need to know: UI tools come back empty there.
+            out.addProperty("headless", uiState.isHeadless());
+            out.addProperty("ui_available", uiState.isAvailable());
 
             Workspace ws = wm.getCurrent();
             boolean open = ws != null && !(ws instanceof EmptyWorkspace);

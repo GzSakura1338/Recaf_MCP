@@ -1,0 +1,33 @@
+# Headless Recaf with the recaf-mcp plugin (no display, no Xvfb).
+#
+# Install as a user service:
+#   mkdir -p ~/.config/systemd/user
+#   cp contrib/systemd/recaf-mcp-headless.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now recaf-mcp-headless
+#
+# Adjust WorkingDirectory/ExecStart to your checkout and target jar.
+
+[Unit]
+Description=Headless Recaf with the recaf-mcp plugin
+Documentation=https://github.com/GzSakura1338/Recaf_MCP
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Recaf_MCP
+Environment=RECAF_MCP_PORT=8750
+Environment=RECAF_JAR=%h/Recaf_MCP/libs/recaf.jar
+Environment=RECAF_PLUGIN_DIR=%h/Recaf_MCP/build/libs
+# Extra JVM flags, e.g. a bigger heap for large jars:
+Environment=RECAF_JVM_ARGS=-Xmx4g
+# Use --input to open a workspace at startup; a fresh jar can also be opened
+# later through the open_workspace MCP tool.
+ExecStart=%h/Recaf_MCP/scripts/linux/start_recaf_headless.sh start --foreground
+Restart=on-failure
+RestartSec=5
+# Recaf writes to its data directory (~/.config/Recaf by default); a user
+# service already has access to it. Nothing needs DISPLAY.
+
+[Install]
+WantedBy=default.target
