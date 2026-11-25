@@ -238,6 +238,9 @@ python recaf_mcp_server.py --http --multi-recaf   # 或 RECAF_SINGLE=0
 - 列窗口不再强制重扫：`list_recaf_windows` 是状态查询，读 3 s 内的缓存；真正用窗口的调用会证明它是否还活着。
 - 扫描的单端口预算从 2 s 降到 0.75 s：同网段若有别的服务卡住，不会把每次扫描拖到 2 s。
 - 空闲回收事件驱动：有调用就 `set()` 事件重算期限，没有调用就一次长等待；停止失败退避 30 s，不忙等。
+- 想量化某次优化：`python scripts/bench_ab.py <优化前的 checkout> .`（两侧跑同一 harness，直接给出百分比）：
+  CPU/调用 **−96.3%**、延迟/调用 **−96.2%**、`list_recaf_windows` **−100%**（约 1.4 万倍）、RSS **−12.8%**；
+  真机链路实测 `list_recaf_windows` 33.3 ms → 2.4 ms（−92.7%）、`get_workspace_info` 26.3 ms → 4.8 ms（−81.7%）
 - 可复现：`python scripts/bench_python_overhead.py`（假插件只答 `/instance`、`/health`、`/class-info`，量每调用 CPU / 内存 / 连接数 / 空闲 CPU）。
 
 ## 配置参考
@@ -348,7 +351,8 @@ python recaf_mcp_server.py --http --host 0.0.0.0   # ⚠️ 暴露到网络
 ├── scripts/
 │   ├── linux/                # 无头启动 / 安装 / 冒烟 / 自检脚本
 │   ├── mcp_tool_matrix.py    # 全量工具矩阵（70 工具 / 109 次调用）
-│   └── bench_python_overhead.py  # 常驻开销基准（CPU / 内存 / 连接数）
+│   ├── bench_python_overhead.py  # 常驻开销基准（CPU / 内存 / 连接数）
+│   └── bench_ab.py             # 两次 checkout 的 A/B 对比（百分比）
 ├── contrib/
 │   ├── dsh-bundle/           # DSH 配置型 bundle（stdio + 自动拉起）
 │   └── systemd/              # systemd 用户单元模板

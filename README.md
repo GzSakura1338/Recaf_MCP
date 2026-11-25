@@ -247,6 +247,7 @@ How:
 - Window resolution is optimistic: the last window list is reused for 30 s without touching the port range, and only a failed request triggers `invalidate()` + retry — so it can never hit the wrong window.
 - Listing windows does not force a rescan, and a single probe may burn 0.75 s instead of 2 s, so a stalled foreign service in the port range cannot slow a scan down.
 - Idle recycling is event-driven: a tool call `set()`s the event to recompute the deadline, no call means one long wait; a failed stop backs off 30 s instead of spinning.
+- Quantify a change: `python scripts/bench_ab.py <checkout-before> .` runs the same harness on both sides and prints the deltas (CPU/call **−96.3 %**, latency/call **−96.2 %**, `list_recaf_windows` **−100 %**, RSS **−12.8 %**; on a live chain `list_recaf_windows` went 33.3 ms → 2.4 ms and `get_workspace_info` 26.3 ms → 4.8 ms).
 - Reproduce it: `python scripts/bench_python_overhead.py` (a fake plugin answers `/instance`, `/health`, `/class-info`; the script reports CPU, memory and connections per call, the window-list cost, and idle CPU).
 
 ## Configuration reference
@@ -358,7 +359,8 @@ firewall or VPN.
 ├── scripts/
 │   ├── linux/                # headless launchers, installer, smoke tests
 │   ├── mcp_tool_matrix.py    # full tool matrix (70 tools, 109 calls)
-│   └── bench_python_overhead.py  # resident-overhead benchmark
+│   ├── bench_python_overhead.py  # resident-overhead benchmark
+│   └── bench_ab.py             # A/B two checkouts, prints the deltas
 ├── contrib/
 │   ├── dsh-bundle/           # DSH configuration-only bundle (stdio + auto-start)
 │   └── systemd/              # systemd user unit templates

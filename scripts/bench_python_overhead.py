@@ -25,7 +25,15 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "mcp-server"))
+# --module-path lets scripts/bench_ab.py point this harness at another checkout
+# (the "before" side of an A/B run) instead of this one.
+_MODULE_PATH = None
+for _i, _arg in enumerate(sys.argv):
+    if _arg == "--module-path" and _i + 1 < len(sys.argv):
+        _MODULE_PATH = Path(sys.argv[_i + 1]).expanduser()
+    elif _arg.startswith("--module-path="):
+        _MODULE_PATH = Path(_arg.split("=", 1)[1]).expanduser()
+sys.path.insert(0, str(_MODULE_PATH or Path(__file__).resolve().parents[1] / "mcp-server"))
 
 from src.server import config, windows  # noqa: E402
 
@@ -148,6 +156,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-n", "--calls", type=int, default=200)
     parser.add_argument("-i", "--idle-seconds", type=float, default=1.0)
+    parser.add_argument("--module-path", help="mcp-server directory to measure "
+                        "(default: the one next to this script)")
     args = parser.parse_args()
 
     _serve(WINDOW_PORT)
